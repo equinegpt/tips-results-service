@@ -32,6 +32,8 @@ def decode_reasoning(value: str | None) -> str:
         r"\\u002B": "+",
         r"\\n": " ",
         r"\\r": " ",
+        r"\\u0027": "'",   #  ← NEW: apostrophe
+
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
@@ -104,7 +106,8 @@ def clean_text(text: str | None) -> str:
     t = t.replace("\\u2014", "—")
     t = t.replace("\\n", " ")
     t = t.replace("\n", " ")
-
+    t = t.replace("\\u0027", "'")   # ← NEW: apostrophe (escaped)
+    t = t.replace("\u0027", "'")   # ← NEW: apostrophe (already decoded)
     # Strip markdown bold markers
     t = t.replace("**", "")
 

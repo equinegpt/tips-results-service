@@ -195,7 +195,7 @@ class IreelClient:
 
     def parse_tips_text(self, text: str) -> List[Dict[str, Any]]:
         """
-        Parse iReel's text response into a list of tip dicts:
+        Parse iReel's text response into a list of tip dicts.
 
         Each dict matches the shape expected inside TipsBatchIn.races[].tips[]:
         {
@@ -205,6 +205,11 @@ class IreelClient:
             "reasoning": str,
             "stake_units": float,
         }
+
+        Robust behaviour:
+        - Handles the normal case: AI Best / Danger / Value.
+        - If there is no explicit "Value:" line but two separate "Danger:"
+          lines are present, the second Danger is treated as VALUE.
         """
         tips: List[Dict[str, Any]] = []
 
@@ -219,68 +224,61 @@ class IreelClient:
         # Decode escaped em-dash for matching
         cleaned = cleaned.replace("\\u2014", "—")
 
-        # AI Best: stop the reason before a newline OR before "Danger:" or "Value:"
+        # AI Best: stop the reason before a newline OR before next labelled tip
         ai_best_re = re.compile(
             r"AI\s*Best\s*:?\s*[#No\.\s]*(\d+)\s+(.+?)\s*[—\-–]\s*(.+?)(?=(?:\n|$|Danger\s*:|Value\s*:))",
             re.IGNORECASE | re.DOTALL,
         )
 
-        # Danger: from label to newline / end or before "Value:"
+        # Danger: allow multiple Danger lines, stop before next label
         danger_re = re.compile(
-            r"Danger\s*:?\s*[#No\.\s]*(\d+)\s+(.+?)\s*[—\-–]\s*(.+?)(?=(?:\n|$|Value\s*:))",
+            r"Danger\s*:?\s*[#No\.\s]*(\d+)\s+(.+?)\s*[—\-–]\s*(.+?)(?=(?:\n|$|Value\s*:|AI\s*Best\s*:|Danger\s*:|$))",
             re.IGNORECASE | re.DOTALL,
         )
 
-        # Value: from label to the end
+        # Explicit Value line, if present
         value_re = re.compile(
             r"Value\s*:?\s*[#No\.\s]*(\d+)\s+(.+?)\s*[—\-–]\s*(.+)",
             re.IGNORECASE | re.DOTALL,
         )
 
+        def make_tip(kind: str, m: re.Match) -> Dict[str, Any]:
+            tab = int(m.group(1))
+            horse = self._clean_fragment(m.group(2))
+            reason = self._clean_fragment(m.group(3))
+            return {
+                "tip_type": kind,
+                "tab_number": tab,
+                "horse_name": horse,
+                "reasoning": reason,
+                "stake_units": 1.0,
+            }
+
+        # --- AI Best ---
         m_best = ai_best_re.search(cleaned)
         if m_best:
-            tab = int(m_best.group(1))
-            horse = self._clean_fragment(m_best.group(2))
-            reason = self._clean_fragment(m_best.group(3))
-            tips.append(
-                {
-                    "tip_type": "AI_BEST",
-                    "tab_number": tab,
-                    "horse_name": horse,
-                    "reasoning": reason,
-                    "stake_units": 1.0,
-                }
-            )
+            tips.append(make_tip("AI_BEST", m_best))
 
-        m_danger = danger_re.search(cleaned)
-        if m_danger:
-            tab = int(m_danger.group(1))
-            horse = self._clean_fragment(m_danger.group(2))
-            reason = self._clean_fragment(m_danger.group(3))
-            tips.append(
-                {
-                    "tip_type": "DANGER",
-                    "tab_number": tab,
-                    "horse_name": horse,
-                    "reasoning": reason,
-                    "stake_units": 1.0,
-                }
-            )
+        # --- Danger(s) ---
+        danger_matches = list(danger_re.finditer(cleaned))
+        if danger_matches:
+            # First Danger is always DANGER
+            tips.append(make_tip("DANGER", danger_matches[0]))
 
+        # --- Value (explicit or inferred) ---
         m_value = value_re.search(cleaned)
         if m_value:
-            tab = int(m_value.group(1))
-            horse = self._clean_fragment(m_value.group(2))
-            reason = self._clean_fragment(m_value.group(3))
-            tips.append(
-                {
-                    "tip_type": "VALUE",
-                    "tab_number": tab,
-                    "horse_name": horse,
-                    "reasoning": reason,
-                    "stake_units": 1.0,
-                }
-            )
+            # Normal labelled Value line
+            tips.append(make_tip("VALUE", m_value))
+        else:
+            # No explicit Value label – if we have a second Danger, treat it as VALUE
+            if len(danger_matches) > 1:
+                log.warning(
+                    "[IreelClient] No explicit 'Value:' line – treating second Danger as VALUE. "
+                    "Raw text: %r",
+                    text[:300],
+                )
+                tips.append(make_tip("VALUE", danger_matches[1]))
 
         return tips
 
