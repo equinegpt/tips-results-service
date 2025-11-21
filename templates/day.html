@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Tips for {{ date.strftime("%A %d %B %Y") }}
+{% endblock %}
+
+{% block body %}
+<main class="page-root">
+
+  {# Top header: logo + title + date picker #}
+  <header class="page-header">
+    <div class="page-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            Tips for {{ date.strftime("%A %d %B %Y") }}
+          </div>
+          <div class="brand-subtitle">
+            Tips Results Service
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-header-right">
+      <form class="date-form" method="get" action="/ui/day">
+        <span class="date-form-label">Date</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">📅</span>
+          <input
+            type="date"
+            id="date"
+            name="date"
+            value="{{ date.isoformat() }}"
+          />
+        </div>
+        <button type="submit" class="btn-go">Go</button>
+      </form>
+    </div>
+  </header>
+
+  {# -------------------- DAY SUMMARY CARD -------------------- #}
+  {% if meetings|length > 0 and day_summary is defined and day_summary %}
+    {% set ds = day_summary %}
+    {% set ds_strike = ds.get('strike_rate_pct', 0.0) %}
+    {% set ds_turnover = ds.get('turnover', 0.0) %}
+    {% set ds_pnl = ds.get('pnl', 0.0) %}
+    {% set ds_quin = ds.get('quinellas', 0) %}
+    {% set ds_tri = ds.get('trifectas', 0) %}
+
+    <section class="meeting-card meeting-card--summary">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <div class="meeting-title-row">
+              <h2 class="meeting-title">
+                Day summary
+              </h2>
+            </div>
+            <div class="meeting-meta">
+              Overall performance for {{ display_date }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="meeting-body">
+        <div class="summary-grid summary-grid--day">
+          <div class="summary-item">
+            <div class="summary-label">TIPS</div>
+            <div class="summary-value">{{ ds.get('tips', 0) }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">WINNERS</div>
+            <div class="summary-value">{{ ds.get('wins', 0) }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">STRIKE RATE</div>
+            <div class="summary-value">
+              {{ "%.1f"|format(ds_strike) }}%
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">TURNOVER</div>
+            <div class="summary-value summary-value--money">
+              ${{ "%.0f"|format(ds_turnover) }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">P&L</div>
+            <div class="summary-value summary-value--money
+                        {% if ds_pnl < 0 %}summary-value--bad{% elif ds_pnl > 0 %}summary-value--good{% endif %}">
+              ${{ "%.0f"|format(ds_pnl) }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">QUINELLAS</div>
+            <div class="summary-value">{{ ds_quin }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">TRIFECTAS</div>
+            <div class="summary-value">{{ ds_tri }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
+  {# -------------------- MEETINGS + RACES -------------------- #}
+  {% if meetings|length == 0 %}
+    <p class="empty-state">No tips found for this date.</p>
+  {% else %}
+    {% for m in meetings %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <button
+              type="button"
+              class="meeting-toggle"
+              data-meeting-toggle
+            >
+              <span class="chevron">▾</span>
+            </button>
+
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">
+                  {{ m.meeting.track_name }}
+                </h2>
+                <span class="state-pill">
+                  {{ m.meeting.state }}
+                </span>
+              </div>
+              <div class="meeting-meta">
+                Tip run:
+                {{ m.tip_run.source }}
+                – {{ m.tip_run.model_version or "n/a" }}
+                · TipRun ID: {{ m.tip_run.id[:8] }}…
+              </div>
+            </div>
+          </div>
+
+          <div class="meeting-header-right">
+            <span class="meeting-meta-label">PF Meeting ID:</span>
+            {% if m.meeting.pf_meeting_id %}
+              <span class="pf-badge pf-badge--ok">
+                {{ m.meeting.pf_meeting_id }}
+              </span>
+            {% else %}
+              <span class="pf-badge pf-badge--missing">
+                missing
+              </span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="meeting-body">
+
+          {# ---------- MEETING SUMMARY STRIP ---------- #}
+          {% set ms = None %}
+          {% if m.summary is defined %}
+            {% set ms = m.summary %}
+          {% elif m.meeting_summary is defined %}
+            {% set ms = m.meeting_summary %}
+          {% endif %}
+
+          {% if ms %}
+            {% set ms_strike = ms.get('strike_rate_pct', 0.0) %}
+            {% set ms_turnover = ms.get('turnover', 0.0) %}
+            {% set ms_pnl = ms.get('pnl', 0.0) %}
+            {% set ms_quin = ms.get('quinellas', 0) %}
+            {% set ms_tri = ms.get('trifectas', 0) %}
+
+            <div class="meeting-summary-strip">
+              <div class="meeting-summary-header">
+                <h3 class="meeting-summary-title">Meeting summary</h3>
+              </div>
+              <div class="summary-grid summary-grid--meeting">
+                <div class="summary-item">
+                  <div class="summary-label">TIPS</div>
+                  <div class="summary-value">{{ ms.get('tips', 0) }}</div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-label">WINNERS</div>
+                  <div class="summary-value">{{ ms.get('wins', 0) }}</div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-label">STRIKE RATE</div>
+                  <div class="summary-value">
+                    {{ "%.1f"|format(ms_strike) }}%
+                  </div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-label">TURNOVER</div>
+                  <div class="summary-value summary-value--money">
+                    ${{ "%.0f"|format(ms_turnover) }}
+                  </div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-label">P&L</div>
+                  <div class="summary-value summary-value--money
+                              {% if ms_pnl < 0 %}summary-value--bad{% elif ms_pnl > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(ms_pnl) }}
+                  </div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-label">QUINELLAS</div>
+                  <div class="summary-value">{{ ms_quin }}</div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-label">TRIFECTAS</div>
+                  <div class="summary-value">{{ ms_tri }}</div>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+
+          {# ---------- RACES ---------- #}
+          {% for r in m.races %}
+            <div class="race-card">
+              <div class="race-header">
+                <div class="race-header-left">
+                  <div class="race-title">
+                    Race {{ r.race_number }}
+                    {% if r.race_name %} – {{ r.race_name }}{% endif %}
+                  </div>
+                </div>
+                <div class="race-header-right">
+                  {% if r.distance_m %}
+                    <span class="distance-pill">
+                      {{ r.distance_m }}m
+                    </span>
+                  {% endif %}
+                </div>
+              </div>
+
+              <table class="race-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>TAB</th>
+                    <th>Horse</th>
+                    <th>Stake</th>
+                    <th>Placing</th>
+                    <th>Result</th>
+                    <th>SP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for t in r.tips %}
+                    <tr>
+                      <td>
+                        {% if t.tip_type == "AI_BEST" %}
+                          <span class="pill pill-ai-best">AI BEST</span>
+                        {% elif t.tip_type == "DANGER" %}
+                          <span class="pill pill-danger">DANGER</span>
+                        {% elif t.tip_type == "VALUE" %}
+                          {# Reuse DANGER pill styling for now to avoid CSS changes #}
+                          <span class="pill pill-danger">VALUE</span>
+                        {% else %}
+                          <span class="pill pill-danger">{{ t.tip_type }}</span>
+                        {% endif %}
+                      </td>
+
+                      <td>#{{ t.tab_number }}</td>
+
+                      <td>{{ t.horse }}</td>
+
+                      <td>$10</td>
+
+                      {# Placing #}
+                      <td>
+                        {% if t.placing %}
+                          {{ t.placing }}
+                        {% else %}
+                          –
+                        {% endif %}
+                      </td>
+
+                      {# Result icon: classes unchanged (colors handled in CSS) #}
+                      <td class="result-cell">
+                        {% if t.result == "WIN" %}
+                          <span class="result-icon result-icon--win">✓</span>
+                        {% elif t.result == "PLACE" %}
+                          <span class="result-icon result-icon--place">•</span>
+                        {% elif t.result %}
+                          <span class="result-icon result-icon--lose">✕</span>
+                        {% else %}
+                          <span class="result-icon result-icon--none">–</span>
+                        {% endif %}
+                      </td>
+
+                      {# SP #}
+                      <td>
+                        {% if t.sp %}
+                          {{ "%.2f"|format(t.sp) }}
+                        {% else %}
+                          –
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+  {% endif %}
+</main>
+{% endblock %}

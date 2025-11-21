@@ -1,0 +1,575 @@
+:root {
+  --bg: #05060a;
+  --surface: #0b0f16;
+  --surface-soft: #0f172a;
+  --border-subtle: #1e293b;
+  --border-soft: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #18cb96;
+  --accent-soft: rgba(24, 203, 150, 0.12);
+  --danger: #f97316;
+  --danger-soft: rgba(249, 115, 22, 0.12);
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --shadow-card: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: radial-gradient(circle at top, #020617 0, #020617 40%, #000 100%);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+/* --- Layout shell --- */
+
+.page-root {
+  max-width: 1200px;
+  margin: 24px auto 40px;
+  padding: 0 24px 24px;
+}
+
+/* --- Page header --- */
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo {
+  height: 32px;
+  width: auto;
+  display: block;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.brand-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.brand-subtitle {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+/* --- Date picker --- */
+
+.page-header-right {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.date-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 14px;
+  background: #020617;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+}
+
+.date-form-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.date-form-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.date-form-icon {
+  position: absolute;
+  left: 8px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.date-form input[type="date"] {
+  background: #020617;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  padding: 4px 10px 4px 26px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+
+.date-form input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+.btn-go {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--accent);
+  color: #020617;
+}
+
+/* --- Meeting cards --- */
+
+.meeting-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 14px 18px 14px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.meeting-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.meeting-header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.meeting-toggle {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: #020617;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.meeting-toggle .chevron {
+  font-size: 14px;
+  transform-origin: center;
+  transition: transform 0.18s ease-out;
+}
+
+.meeting-card.meeting-card--collapsed .chevron {
+  transform: rotate(-90deg);
+}
+
+.meeting-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meeting-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meeting-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.state-pill {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.meeting-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.meeting-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pf-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--border-subtle);
+}
+
+.pf-badge--ok {
+  border-color: rgba(24, 203, 150, 0.6);
+  background: rgba(24, 203, 150, 0.08);
+  color: var(--accent);
+}
+
+.pf-badge--missing {
+  border-color: rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fecaca;
+}
+
+/* collapse body */
+
+.meeting-body {
+  margin-top: 6px;
+}
+
+.meeting-card.meeting-card--collapsed .meeting-body {
+  display: none;
+}
+/* --- Day / meeting summary styling --- */
+
+.day-summary-card {
+  margin-bottom: 24px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px 24px;
+  margin-top: 10px;
+}
+
+.summary-grid--compact {
+  gap: 4px 16px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+
+.summary-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+.summary-value {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.summary-value--money {
+  font-feature-settings: "tnum" 1;
+}
+
+.summary-value--good {
+  color: #33d48f;
+}
+
+.summary-value--bad {
+  color: #ff6b7a;
+}
+
+.meeting-summary-strip {
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Simple dots for WIN / PLACE / LOSE already used in race rows */
+.result-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.result-dot--win {
+  background: #1f8f4d;
+}
+
+.result-dot--place {
+  background: #3c6fe8;
+}
+
+.result-dot--lose {
+  background: #444;
+}
+
+/* --- Race cards --- */
+
+.race-card {
+  background: #020617;
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.race-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(to right, #020617, #020617);
+}
+
+.race-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.distance-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* --- Table --- */
+
+.race-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.race-table thead {
+  background: #020617;
+}
+
+.race-table th,
+.race-table td {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.race-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.race-table tbody tr {
+  border-bottom: 1px solid #020617;
+}
+
+.race-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.col-type {
+  width: 96px;
+}
+
+.col-tab {
+  width: 52px;
+}
+
+.col-horse {
+  width: 190px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-reason {
+  color: var(--muted);
+}
+
+.col-money,
+.col-centre {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* --- Pills --- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.pill-ai-best {
+  background: var(--accent-soft);
+  border: 1px solid rgba(24, 203, 150, 0.8);
+  color: #bbf7d0;
+}
+
+.pill-danger {
+  background: var(--danger-soft);
+  border: 1px solid rgba(248, 113, 22, 0.8);
+  color: #fed7aa;
+}
+
+/* --- Misc --- */
+
+.empty-state {
+  margin-top: 40px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* Simple responsive tweak */
+
+@media (max-width: 900px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .page-header-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .date-form {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+/* ------ Summary cards (day + meeting) ------ */
+
+.summary-card {
+  margin-bottom: 24px;
+}
+
+.summary-body {
+  padding: 14px 20px 18px;
+}
+
+.meeting-summary {
+  padding: 10px 20px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 6px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 24px;
+  font-size: 13px;
+}
+
+.summary-item {
+  min-width: 0;
+}
+
+.summary-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+  margin-bottom: 2px;
+}
+
+.summary-value {
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-value--money {
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-value--good {
+  color: #18cb96; /* brand green */
+}
+
+.summary-value--bad {
+  color: #ff5c5c;
+}
+
+/* ------ Result icons (WIN / PLACE / LOSE) ------ */
+
+.col-result {
+  text-align: center;
+}
+
+.result-icon {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.result-icon--win {
+  color: #18cb96; /* green tick */
+}
+
+.result-icon--place {
+  color: #ffb347; /* orange dot */
+}
+
+.result-icon--lose {
+  color: #ff5c5c; /* red cross */
+}
+
+.result-icon--pending {
+  opacity: 0.4;
+}

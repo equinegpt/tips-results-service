@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{% block title %}Tips Results Service{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    {# Single CSS entry point #}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', path='styles.css') }}"
+    />
+  </head>
+  <body>
+    {% block body %}{% endblock %}
+
+    <script>
+      // Collapse / expand meetings
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll("[data-meeting-toggle]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const card = btn.closest(".meeting-card");
+            if (!card) return;
+            card.classList.toggle("meeting-card--collapsed");
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
