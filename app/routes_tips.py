@@ -1,4 +1,3 @@
-# app/routes_tips.py
 from __future__ import annotations
 
 import time
@@ -229,7 +228,12 @@ def cron_generate_daily_tips(
     db: Session = Depends(get_db),
 ):
     """
-    Cron-style endpoint (unchanged).
+    Cron-style endpoint.
+
+    Uses daily_generator.build_generate_tips_payloads_for_date(), which
+    now filters to Metro ("M") and Provincial ("P") meetings only.
+    Country ("C") cards are excluded here by design, and can be run
+    explicitly via /cron/generate-meeting-tips.
     """
     target_date = date_type.fromisoformat(date_str)
     print(f"[CRON] Generating tips for {target_date} (project_id={project_id})")
@@ -240,6 +244,8 @@ def cron_generate_daily_tips(
     )
     print(f"[CRON] daily_generator returned {len(payloads)} meetings")
 
+    # Optional: narrow to a single PF meeting (still respects M/P filtering
+    # done in daily_generator).
     if only_pf_meeting_id is not None:
         payloads = [
             p for p in payloads
@@ -250,7 +256,7 @@ def cron_generate_daily_tips(
             f"{len(payloads)} meetings remain"
         )
 
-    # Optionally skip some tracks
+    # Optionally skip some tracks by name
     if skip_tracks:
         payloads = [
             p for p in payloads
@@ -296,6 +302,7 @@ def cron_generate_daily_tips(
                 )
                 tip_dicts = []
             finally:
+                # Play nice with iReel rate limits
                 time.sleep(1.0)
 
             if not tip_dicts:
@@ -342,6 +349,8 @@ def cron_generate_daily_tips(
         tip_runs_created=tip_runs_created,
         races_with_tips=races_with_tips,
     )
+
+
 @router.post("/cron/generate-meeting-tips", response_model=schemas.MeetingTipsOut)
 def cron_generate_meeting_tips(
     date_str: str = Query(..., alias="date"),
@@ -355,6 +364,9 @@ def cron_generate_meeting_tips(
 
     Example:
       POST /cron/generate-meeting-tips?date=2025-11-23&pf_meeting_id=235501&project_id=...
+
+    Use this when you want to explicitly run a Country ("C") card or
+    a specific meeting that isn't included in the default M/P sweep.
     """
     target_date = date_type.fromisoformat(date_str)
     print(
@@ -363,7 +375,10 @@ def cron_generate_meeting_tips(
         f"(project_id={project_id})"
     )
 
-    # Build all payloads for the date, then pick the one with this pf_meeting_id
+    # Build all payloads for the date, then pick the one with this pf_meeting_id.
+    # Note: daily_generator currently filters to M/P inside; if you later
+    # adjust it to take a "track types" flag, you can call the "all tracks"
+    # variant from here to include Country as well.
     payloads = daily_generator.build_generate_tips_payloads_for_date(
         target_date=target_date,
         project_id=project_id,
@@ -435,6 +450,7 @@ def cron_generate_meeting_tips(
 
     # Re-use the existing batch path so everything is stored exactly the same
     return create_tips_batch(tips_batch, db=db)
+
 
 @router.get("/tips", response_model=list[schemas.MeetingTipsOut])
 def list_tips(

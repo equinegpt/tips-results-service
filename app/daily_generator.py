@@ -256,7 +256,8 @@ def build_generate_tips_payloads_for_date(
     Build one GenerateTipsIn payload per meeting for the given date,
     using RA Crawler /races as the source of truth, PF for scratchings + conditions.
 
-    - Includes ALL AUS meetings we can see for that date
+    - Includes AUS Metro ("M") and Provincial ("P") meetings only
+    - Excludes Country ("C") by default
     - Excludes HK / NZ (by state or country)
     - Scratchings + conditions always use PF's "today" view
     - pf_meeting_id is taken from RA /races (meetingId/pf_meeting_id/etc)
@@ -268,12 +269,26 @@ def build_generate_tips_payloads_for_date(
     # Group by (date, track_name, state)
     meetings: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
 
+    ALLOWED_TRACK_TYPES = {"M", "P"}  # Metro + Provincial
+
     for r in races:
         state = r.get("state")
         country = r.get("country")
 
         # Exclude HK and NZ
         if state in {"HK", "NZ"} or country in {"HK", "NZ"}:
+            continue
+
+        # --- NEW: filter to Metro/Provincial only ---
+        # RA /races typically uses "type": "M"/"P"/"C".
+        # Some feeds might also expose "location": "M"/"P"/"C".
+        loc = (r.get("location") or r.get("type") or "").strip().upper()
+        if loc and loc not in ALLOWED_TRACK_TYPES:
+            # Country or unknown meeting type – skip for auto tips
+            print(
+                f"[RA] skipping non-M/P meeting: track={r.get('track')!r}, "
+                f"state={state!r}, type/location={loc!r}"
+            )
             continue
 
         track_name = r.get("track") or r.get("track_name")
