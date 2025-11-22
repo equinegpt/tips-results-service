@@ -342,7 +342,99 @@ def cron_generate_daily_tips(
         tip_runs_created=tip_runs_created,
         races_with_tips=races_with_tips,
     )
+@router.post("/cron/generate-meeting-tips", response_model=schemas.MeetingTipsOut)
+def cron_generate_meeting_tips(
+    date_str: str = Query(..., alias="date"),
+    pf_meeting_id: int = Query(..., alias="pf_meeting_id"),
+    project_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Cron-style endpoint to generate tips for a *single* PF meeting id
+    on a given date.
 
+    Example:
+      POST /cron/generate-meeting-tips?date=2025-11-23&pf_meeting_id=235501&project_id=...
+    """
+    target_date = date_type.fromisoformat(date_str)
+    print(
+        f"[CRON] Generating tips for single meeting "
+        f"pf_meeting_id={pf_meeting_id} on {target_date} "
+        f"(project_id={project_id})"
+    )
+
+    # Build all payloads for the date, then pick the one with this pf_meeting_id
+    payloads = daily_generator.build_generate_tips_payloads_for_date(
+        target_date=target_date,
+        project_id=project_id,
+    )
+    print(f"[CRON] daily_generator returned {len(payloads)} meetings for {target_date}")
+
+    payload = next(
+        (p for p in payloads if getattr(p.meeting, "pf_meeting_id", None) == pf_meeting_id),
+        None,
+    )
+
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No meeting with pf_meeting_id={pf_meeting_id} on {target_date}",
+        )
+
+    meeting = payload.meeting
+    tip_run_in = payload.tip_run
+    races_entries: list[dict[str, Any]] = []
+
+    for race_ctx in payload.races:
+        race_in = race_ctx.race
+        scratchings = race_ctx.scratchings or []
+        track_condition = race_ctx.track_condition
+
+        print(
+            f"[CRON] (single) calling iReel for "
+            f"{getattr(meeting, 'track_name', meeting)} "
+            f"R{getattr(race_in, 'race_number', '?')}, "
+            f"scratchings={scratchings}, cond={track_condition!r}"
+        )
+
+        try:
+            tip_dicts = ireel_client.generate_race_tips(
+                meeting=meeting,
+                race=race_in,
+                scratchings=scratchings,
+                track_condition=track_condition,
+                project_id=tip_run_in.project_id,
+            )
+        except Exception as e:
+            print(
+                f"[CRON] (single) iReel error for "
+                f"{getattr(meeting, 'track_name', meeting)} "
+                f"R{getattr(race_in, 'race_number', '?')}: {e}"
+            )
+            tip_dicts = []
+        finally:
+            # Play nice with iReel rate limits
+            time.sleep(1.0)
+
+        if not tip_dicts:
+            continue
+
+        races_entries.append({"race": race_in, "tips": tip_dicts})
+
+    if not races_entries:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No tips generated for pf_meeting_id={pf_meeting_id} on {target_date}",
+        )
+
+    tips_batch = schemas.TipsBatchIn(
+        meeting=meeting,
+        tip_run=tip_run_in,
+        races=races_entries,
+    )
+
+    # Re-use the existing batch path so everything is stored exactly the same
+    return create_tips_batch(tips_batch, db=db)
 
 @router.get("/tips", response_model=list[schemas.MeetingTipsOut])
 def list_tips(
