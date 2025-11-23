@@ -251,16 +251,18 @@ def _fetch_pf_track_conditions(target_date: date) -> Dict[str, str]:
 def build_generate_tips_payloads_for_date(
     target_date: date,
     project_id: str,
+    *,
+    track_types: set[str] | None = None,
 ) -> List[schemas.GenerateTipsIn]:
     """
     Build one GenerateTipsIn payload per meeting for the given date,
     using RA Crawler /races as the source of truth, PF for scratchings + conditions.
 
-    - Includes AUS Metro ("M") and Provincial ("P") meetings only
-    - Excludes Country ("C") by default
-    - Excludes HK / NZ (by state or country)
-    - Scratchings + conditions always use PF's "today" view
-    - pf_meeting_id is taken from RA /races (meetingId/pf_meeting_id/etc)
+    - Includes AUS meetings for that date (HK/NZ excluded)
+    - If track_types is not None, only keep RA races whose `type` is in that set
+      (e.g. {'M', 'P'} for Metro + Provincial).
+    - PF scratchings + conditions always use PF's "today" view.
+    - pf_meeting_id is taken from RA /races (meetingId/pf_meeting_id/etc).
     """
     races = _fetch_ra_races_for_date(target_date)
     scratchings_lookup = _fetch_pf_scratchings_lookup(target_date)
@@ -268,8 +270,6 @@ def build_generate_tips_payloads_for_date(
 
     # Group by (date, track_name, state)
     meetings: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
-
-    ALLOWED_TRACK_TYPES = {"M", "P"}  # Metro + Provincial
 
     for r in races:
         state = r.get("state")
@@ -279,25 +279,23 @@ def build_generate_tips_payloads_for_date(
         if state in {"HK", "NZ"} or country in {"HK", "NZ"}:
             continue
 
-        # --- NEW: filter to Metro/Provincial only ---
-        # RA /races typically uses "type": "M"/"P"/"C".
-        # Some feeds might also expose "location": "M"/"P"/"C".
-        loc = (r.get("location") or r.get("type") or "").strip().upper()
-        if loc and loc not in ALLOWED_TRACK_TYPES:
-            # Country or unknown meeting type – skip for auto tips
-            print(
-                f"[RA] skipping non-M/P meeting: track={r.get('track')!r}, "
-                f"state={state!r}, type/location={loc!r}"
-            )
+        # RA meeting type: 'M', 'P', 'C', etc.
+        track_type = (r.get("type") or r.get("track_type") or "").strip().upper()
+        if track_types is not None and track_type and track_type not in track_types:
+            # e.g. skip 'C' when track_types = {'M', 'P'}
             continue
 
         track_name = r.get("track") or r.get("track_name")
         if not track_name:
             continue
 
-        date_str = r.get("date") or target_date.isoformat()
-        key = (date_str, track_name, state or "")
+        date_str = (
+            r.get("date")
+            or r.get("meeting_date")
+            or target_date.isoformat()
+        )
 
+        key = (date_str[:10], track_name, state or "")
         meetings[key].append(r)
 
     payloads: List[schemas.GenerateTipsIn] = []

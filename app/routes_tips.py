@@ -239,8 +239,9 @@ def cron_generate_daily_tips(
     print(f"[CRON] Generating tips for {target_date} (project_id={project_id})")
 
     payloads = daily_generator.build_generate_tips_payloads_for_date(
-        target_date=target_date,
-        project_id=project_id,
+    target_date=target_date,
+    project_id=project_id,
+    track_types={"M", "P"},  # Metro + Provincial only
     )
     print(f"[CRON] daily_generator returned {len(payloads)} meetings")
 
@@ -380,9 +381,11 @@ def cron_generate_meeting_tips(
     # adjust it to take a "track types" flag, you can call the "all tracks"
     # variant from here to include Country as well.
     payloads = daily_generator.build_generate_tips_payloads_for_date(
-        target_date=target_date,
-        project_id=project_id,
+    target_date=target_date,
+    project_id=project_id,
+    track_types=None,  # include M, P, C (still excludes HK/NZ)
     )
+
     print(f"[CRON] daily_generator returned {len(payloads)} meetings for {target_date}")
 
     payload = next(
