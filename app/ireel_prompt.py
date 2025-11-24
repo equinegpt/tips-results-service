@@ -48,9 +48,9 @@ def build_race_prompt(
 
     lines.append("")
     lines.append("Please reply with short mobile-length tips:")
-    lines.append('• "AI Best: #<TAB> <Horse> — <one-sentence reason>"')
-    lines.append('• "Danger: #<TAB> <Horse> — <one-sentence reason>"')
-    lines.append('• "Value: #<TAB> <Horse> — <one-sentence reason>"')
+    lines.append('• "AI Best: #<TAB> <Horse> — <reason>"')
+    lines.append('• "Danger: #<TAB> <Horse> — <reason>"')
+    lines.append('• "Value: #<TAB> <Horse> — <reason>"')
     lines.append("No extra commentary.")
 
     return "\n".join(lines)
