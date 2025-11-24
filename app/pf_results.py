@@ -193,9 +193,35 @@ def _fetch_pf_post_race(meeting_id: int, race_number: int) -> List[Dict[str, Any
         "apiKey": PF_POST_RACE_API_KEY,
     }
 
-    resp = httpx.get(PF_POST_RACE_URL, params=params, timeout=30.0)
-    resp.raise_for_status()
-    raw = resp.json()
+    try:
+        resp = httpx.get(PF_POST_RACE_URL, params=params, timeout=30.0)
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        # If PF itself returns 4xx/5xx, log and skip this race instead of 500'ing.
+        print(
+            f"[PF]  HTTP error for meetingId={meeting_id}, "
+            f"raceNumber={race_number}: {repr(e)}"
+        )
+        try:
+            print("[PF]  response body (truncated):", resp.text[:500])
+        except Exception:
+            pass
+        return []
+
+    # Try to decode JSON but don't let failures kill the whole cron
+    try:
+        raw = resp.json()
+    except Exception as e:
+        print(
+            f"[PF]  JSON decode error for meetingId={meeting_id}, "
+            f"raceNumber={race_number}: {repr(e)}"
+        )
+        try:
+            print("[PF]  raw response (truncated):", resp.text[:500])
+        except Exception:
+            pass
+        # Treat this race as having no PF data
+        return []
 
     # Unwrap the common {"statusCode": ..., "payLoad": ...} shape
     if isinstance(raw, dict):
