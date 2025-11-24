@@ -243,6 +243,58 @@ def _fetch_pf_track_conditions(target_date: date) -> Dict[str, str]:
     )
     return lookup
 
+def _meeting_has_big_maiden(
+    race_list: List[Dict[str, Any]],
+    threshold: int = 29000,
+) -> bool:
+    """
+    Return True if ANY race in this meeting is a Maiden-class event
+    with prize money strictly above `threshold` (e.g. > 29,000).
+
+    We treat the meeting as Country in the selection logic and only
+    include it automatically if this returns True.
+    """
+    for r in race_list:
+        # Class / raceClass field – try a few common keys.
+        class_text = (
+            r.get("class")
+            or r.get("class_text")
+            or r.get("raceClass")
+            or r.get("race_class")
+        )
+
+        if not isinstance(class_text, str):
+            continue
+
+        lc = class_text.lower()
+
+        # Maiden detection – be tolerant of "Maiden", "MDN", etc.
+        is_maiden = ("maiden" in lc) or ("mdn" in lc)
+        if not is_maiden:
+            continue
+
+        # Prize money – RA usually has an integer 'prize' field.
+        raw_prize = (
+            r.get("prize")
+            or r.get("prizemoney")
+            or r.get("prize_total")
+        )
+
+        if raw_prize is None:
+            continue
+
+        try:
+            prize_val = int(raw_prize)
+        except (TypeError, ValueError):
+            try:
+                prize_val = int(float(raw_prize))
+            except Exception:
+                continue
+
+        if prize_val > threshold:
+            return True
+
+    return False
 
 # ----------------------------
 # BUILD PAYLOADS
@@ -252,17 +304,30 @@ def build_generate_tips_payloads_for_date(
     target_date: date,
     project_id: str,
     *,
-    track_types: set[str] | None = None,
+    force_all_meetings: bool = False,
 ) -> List[schemas.GenerateTipsIn]:
     """
     Build one GenerateTipsIn payload per meeting for the given date,
     using RA Crawler /races as the source of truth, PF for scratchings + conditions.
 
-    - Includes AUS meetings for that date (HK/NZ excluded)
-    - If track_types is not None, only keep RA races whose `type` is in that set
-      (e.g. {'M', 'P'} for Metro + Provincial).
-    - PF scratchings + conditions always use PF's "today" view.
-    - pf_meeting_id is taken from RA /races (meetingId/pf_meeting_id/etc).
+    Selection rules:
+
+      • Always include Metro (type == "M") meetings.
+      • Always include Provincial (type == "P") meetings.
+      • Treat everything else as Country:
+
+          - If force_all_meetings=False (normal daily cron):
+              Include a Country meeting ONLY if it has at least one
+              Maiden-class race with prize > 29,000.
+
+          - If force_all_meetings=True (single-meeting override):
+              Include all meetings (M / P / C), regardless of prize.
+
+      • HK / NZ are always excluded by state/country.
+
+    Manual overrides:
+      - /cron/generate-meeting-tips uses force_all_meetings=True so you
+        can always pull ANY meeting (even small Country cards) by pf_meeting_id.
     """
     races = _fetch_ra_races_for_date(target_date)
     scratchings_lookup = _fetch_pf_scratchings_lookup(target_date)
@@ -279,23 +344,13 @@ def build_generate_tips_payloads_for_date(
         if state in {"HK", "NZ"} or country in {"HK", "NZ"}:
             continue
 
-        # RA meeting type: 'M', 'P', 'C', etc.
-        track_type = (r.get("type") or r.get("track_type") or "").strip().upper()
-        if track_types is not None and track_type and track_type not in track_types:
-            # e.g. skip 'C' when track_types = {'M', 'P'}
-            continue
-
         track_name = r.get("track") or r.get("track_name")
         if not track_name:
             continue
 
-        date_str = (
-            r.get("date")
-            or r.get("meeting_date")
-            or target_date.isoformat()
-        )
+        date_str = r.get("date") or target_date.isoformat()
+        key = (date_str, track_name, state or "")
 
-        key = (date_str[:10], track_name, state or "")
         meetings[key].append(r)
 
     payloads: List[schemas.GenerateTipsIn] = []
@@ -307,6 +362,27 @@ def build_generate_tips_payloads_for_date(
             meeting_date = date.fromisoformat(date_str[:10])
         except Exception:
             pass
+
+        # ---------------------------
+        # Meeting type: M / P / C
+        # ---------------------------
+        raw_type = race_list[0].get("type") or race_list[0].get("meeting_type") or ""
+        meeting_type = str(raw_type).strip().upper() or "C"
+
+        is_metro = meeting_type == "M"
+        is_prov = meeting_type == "P"
+        is_country = not (is_metro or is_prov)  # treat everything else as Country
+
+        if not force_all_meetings:
+            if is_country:
+                # Only include Country meetings if they have a "big maiden"
+                if not _meeting_has_big_maiden(race_list, threshold=29000):
+                    print(
+                        f"[DG] Skipping COUNTRY meeting {track_name} {state} on "
+                        f"{meeting_date} (type={meeting_type}) – no Maiden > 29k"
+                    )
+                    continue
+            # Metro & Provincial always included
 
         # --- pf_meeting_id from RA /races (meetingId etc) ---
         pf_meeting_id: int | None = None
@@ -348,7 +424,7 @@ def build_generate_tips_payloads_for_date(
                     )
                     break
 
-        # Meeting dict (now includes pf_meeting_id)
+        # Meeting dict (same schema as before)
         meeting_dict = {
             "date": meeting_date,
             "track_name": track_name,
@@ -427,3 +503,4 @@ def build_generate_tips_payloads_for_date(
         )
 
     return payloads
+
