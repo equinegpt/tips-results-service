@@ -89,6 +89,12 @@ class TipOut(BaseModel):
     class Config:
         from_attributes = True
 
+class FetchPfResultsOut(BaseModel):
+    ok: bool
+    date: str
+    race_results_inserted: int
+    # Optional error string so we can see why a run failed
+    error: str | None = None
 
 class RaceWithTipsOut(BaseModel):
     race: RaceOut
