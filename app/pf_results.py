@@ -18,6 +18,43 @@ PF_POST_RACE_API_KEY = "c867b2f9-d740-4cce-b772-801708c8191d"
 SKYNET_PRICES_URL = "https://puntx.puntingform.com.au/api/skynet/getskynetprices"
 SKYNET_API_KEY = "1eb003d7-00a7-4233-944c-88e6c7fbf246"
 
+PF_TIMEOUT = httpx.Timeout(
+    timeout=60.0,   # overall
+    connect=10.0,   # connection phase
+    read=50.0,      # waiting for body
+    write=10.0,     # sending body (we barely use this)
+)
+
+def _pf_get_json(url: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Wrapper around httpx GET for PuntingForm that:
+      - uses a generous timeout
+      - catches ReadTimeout and logs instead of blowing up the whole run
+    """
+    try:
+        with httpx.Client(timeout=PF_TIMEOUT) as client:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.ReadTimeout:
+        print(f"[PF] Read timeout for URL={url} params={params}")
+        return None
+    except Exception as e:
+        print(f"[PF] Error fetching {url} params={params}: {e}")
+        return None
+
+def _pf_post_json(url: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    try:
+        with httpx.Client(timeout=PF_TIMEOUT) as client:
+            resp = client.post(url, params=params)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.ReadTimeout:
+        print(f"[PF] Read timeout (POST) for URL={url} params={params}")
+        return None
+    except Exception as e:
+        print(f"[PF] Error (POST) fetching {url} params={params}: {e}")
+        return None
 
 # -----------------------
 # Helpers
@@ -193,34 +230,13 @@ def _fetch_pf_post_race(meeting_id: int, race_number: int) -> List[Dict[str, Any
         "apiKey": PF_POST_RACE_API_KEY,
     }
 
-    try:
-        resp = httpx.get(PF_POST_RACE_URL, params=params, timeout=30.0)
-        resp.raise_for_status()
-    except httpx.HTTPError as e:
-        # If PF itself returns 4xx/5xx, log and skip this race instead of 500'ing.
+    raw = _pf_get_json(PF_POST_RACE_URL, params)
+    if raw is None:
+        # Already logged in _pf_get_json
         print(
-            f"[PF]  HTTP error for meetingId={meeting_id}, "
-            f"raceNumber={race_number}: {repr(e)}"
+            f"[PF]  post-race: no data for meetingId={meeting_id}, "
+            f"raceNumber={race_number} (timeout or HTTP error)"
         )
-        try:
-            print("[PF]  response body (truncated):", resp.text[:500])
-        except Exception:
-            pass
-        return []
-
-    # Try to decode JSON but don't let failures kill the whole cron
-    try:
-        raw = resp.json()
-    except Exception as e:
-        print(
-            f"[PF]  JSON decode error for meetingId={meeting_id}, "
-            f"raceNumber={race_number}: {repr(e)}"
-        )
-        try:
-            print("[PF]  raw response (truncated):", resp.text[:500])
-        except Exception:
-            pass
-        # Treat this race as having no PF data
         return []
 
     # Unwrap the common {"statusCode": ..., "payLoad": ...} shape
@@ -243,7 +259,7 @@ def _fetch_pf_post_race(meeting_id: int, race_number: int) -> List[Dict[str, Any
     if not isinstance(raw_runners, list):
         top_keys = list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__
         print(
-            f"[PF]  post-race returned no runner rows for "
+            f"[PF]  post-race returned non-list runners for "
             f"meetingId={meeting_id}, raceNumber={race_number}, "
             f"top_keys={top_keys}"
         )
@@ -267,13 +283,15 @@ def _fetch_pf_post_race(meeting_id: int, race_number: int) -> List[Dict[str, Any
         benchmark = r.get("benchmark")
         jockey = r.get("jockey")
 
+        blocks = (rating, sectional, benchmark, jockey)
+
         # Newer PF "ireel" shape – merge rating/sectional/benchmark/jockey
-        if any(isinstance(block, dict) for block in (rating, sectional, benchmark, jockey)):
+        if any(isinstance(block, dict) for block in blocks):
             merged: Dict[str, Any] = {}
 
             # Merge all blocks; if the same key appears multiple times,
             # keep the first non-null value.
-            for block in (rating, sectional, benchmark, jockey):
+            for block in blocks:
                 if isinstance(block, dict):
                     for k, v in block.items():
                         if v is not None and k not in merged:
@@ -293,8 +311,9 @@ def _fetch_pf_post_race(meeting_id: int, race_number: int) -> List[Dict[str, Any
                 "margFin",   # margin
                 "status",
             ):
-                if k in r and r[k] is not None and k not in merged:
-                    merged[k] = r[k]
+                v = r.get(k)
+                if v is not None and k not in merged:
+                    merged[k] = v
 
             normalised.append(merged)
         else:
@@ -315,13 +334,12 @@ def _fetch_pf_post_race(meeting_id: int, race_number: int) -> List[Dict[str, Any
     else:
         top_keys = list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__
         print(
-            f"[PF]  post-race returned no runner rows for "
+            f"[PF]  post-race normalisation produced no runners for "
             f"meetingId={meeting_id}, raceNumber={race_number}, "
             f"top_keys={top_keys}"
         )
 
     return normalised
-
 
 def _fetch_skynet_prices_for_date(target_date: date_type) -> Dict[Tuple[int, int, int], Decimal]:
     """
@@ -337,24 +355,33 @@ def _fetch_skynet_prices_for_date(target_date: date_type) -> Dict[Tuple[int, int
         "apikey": SKYNET_API_KEY,
     }
 
-    resp = httpx.get(SKYNET_PRICES_URL, params=params, timeout=30.0)
-    resp.raise_for_status()
-    data = resp.json()
+    data = _pf_get_json(SKYNET_PRICES_URL, params)
+    price_map: Dict[Tuple[int, int, int], Decimal] = {}
+
+    if data is None:
+        print(
+            f"[PF] Skynet prices: no data for {target_date} "
+            f"(timeout or HTTP error)"
+        )
+        return price_map
 
     # Data is usually a list of rows; sometimes wrapped in {"data": [...]}
-    if isinstance(data, dict) and "data" in data:
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
         rows = data["data"]
     else:
         rows = data
 
-    price_map: Dict[Tuple[int, int, int], Decimal] = {}
-
     if not isinstance(rows, list):
-        print(f"[PF] Skynet prices unexpected shape: {type(rows).__name__}")
+        print(
+            f"[PF] Skynet prices unexpected shape for {target_date}: "
+            f"{type(rows).__name__}"
+        )
         return price_map
 
     count = 0
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         try:
             meeting_id = _to_int(row.get("meetingId"))
             race_no = _to_int(row.get("raceNumber"))
@@ -369,9 +396,10 @@ def _fetch_skynet_prices_for_date(target_date: date_type) -> Dict[Tuple[int, int
         price_map[(meeting_id, race_no, tab_no)] = sp
         count += 1
 
-    print(f"[PF] Skynet prices: built map for {count} runner prices on {target_date}")
+    print(
+        f"[PF] Skynet prices: built map for {count} runner prices on {target_date}"
+    )
     return price_map
-
 
 def _attach_tip_outcomes_from_existing_results_for_date(
     target_date: date_type,
@@ -390,7 +418,7 @@ def _attach_tip_outcomes_from_existing_results_for_date(
       * Otherwise, try to find a RaceResult for the same race/tab,
         preferring PF, then RA, then any other provider.
     """
-    tips = (
+    tips: List[models.Tip] = (
         db.query(models.Tip)
         .join(models.Race, models.Tip.race_id == models.Race.id)
         .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
@@ -398,33 +426,56 @@ def _attach_tip_outcomes_from_existing_results_for_date(
         .all()
     )
 
+    if not tips:
+        return 0
+
+    tip_ids = [t.id for t in tips]
+
+    # Existing outcomes → set of tip_ids we should skip
+    existing_outcome_rows = (
+        db.query(models.TipOutcome.tip_id)
+        .filter(models.TipOutcome.tip_id.in_(tip_ids))
+        .all()
+    )
+    existing_tip_ids = {row[0] for row in existing_outcome_rows}
+
+    # Build an index of RaceResult rows for all races on this date:
+    #   (race_id, tab_number) -> best RaceResult (PF > RA > other)
+    race_ids = {t.race_id for t in tips}
+    rr_index: Dict[Tuple[int, int], models.RaceResult] = {}
+
+    if race_ids:
+        rr_rows = (
+            db.query(models.RaceResult)
+            .filter(models.RaceResult.race_id.in_(race_ids))
+            .all()
+        )
+        for rr in rr_rows:
+            key = (rr.race_id, rr.tab_number)
+            existing = rr_index.get(key)
+            if existing is None:
+                rr_index[key] = rr
+            else:
+                # Prefer PF, then RA, then whatever we had before
+                existing_provider = (existing.provider or "").upper()
+                new_provider = (rr.provider or "").upper()
+
+                if existing_provider == new_provider:
+                    continue
+                if existing_provider == "PF":
+                    continue
+                if existing_provider == "RA" and new_provider != "PF":
+                    continue
+
+                rr_index[key] = rr
+
     count = 0
 
     for tip in tips:
-        # Skip if outcome already exists for this tip
-        existing_outcome = (
-            db.query(models.TipOutcome)
-            .filter(models.TipOutcome.tip_id == tip.id)
-            .one_or_none()
-        )
-        if existing_outcome is not None:
+        if tip.id in existing_tip_ids:
             continue
 
-        base_q = (
-            db.query(models.RaceResult)
-            .filter(
-                models.RaceResult.race_id == tip.race_id,
-                models.RaceResult.tab_number == tip.tab_number,
-            )
-        )
-
-        # Prefer PF, then RA, then anything else.
-        rr = (
-            base_q.filter(models.RaceResult.provider == "PF").one_or_none()
-            or base_q.filter(models.RaceResult.provider == "RA").one_or_none()
-            or base_q.first()
-        )
-
+        rr = rr_index.get((tip.race_id, tip.tab_number))
         if rr is None:
             continue
 
@@ -439,6 +490,7 @@ def _attach_tip_outcomes_from_existing_results_for_date(
         outcome.finish_position = rr.finish_position
         outcome.starting_price = rr.starting_price
         outcome.outcome_status = _classify_outcome(rr.finish_position)
+
         db.add(outcome)
         count += 1
 
@@ -449,7 +501,6 @@ def _attach_tip_outcomes_from_existing_results_for_date(
         )
 
     return count
-
 
 # -----------------------
 # Main import function
