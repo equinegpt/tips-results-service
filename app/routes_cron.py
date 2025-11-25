@@ -9,8 +9,23 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from . import results_ra, pf_results, stats_rollup, daily_generator, schemas  # or similar
+from . import (
+    results_ra,
+    pf_results,
+    stats_rollup,
+    daily_generator,
+    schemas,
+    models,
+)
 
+# pull the internal helpers we’re using from pf_results
+from .pf_results import (
+    _fetch_pf_post_race,
+    _fetch_skynet_prices_for_date,
+    _attach_tip_outcomes_from_existing_results_for_date,
+    _to_int,
+    _to_decimal,
+)
 
 router = APIRouter()
 
