@@ -23,6 +23,7 @@ from .pf_results import (
     _fetch_pf_post_race,
     _fetch_skynet_prices_for_date,
     _attach_tip_outcomes_from_existing_results_for_date,
+    _apply_skynet_sp_to_existing_results_for_date,
     _to_int,
     _to_decimal,
 )
@@ -193,7 +194,24 @@ def cron_fetch_pf_results(
     db.commit()
 
     # ----------------------------------------
-    # 4) Backfill TipOutcome rows from RaceResult
+    # 4) Overlay Skynet SP onto existing RaceResult rows (RA + PF)
+    # ----------------------------------------
+    try:
+        overlay_updates = _apply_skynet_sp_to_existing_results_for_date(
+            target_date=target_date,
+            skynet_prices=skynet_prices,
+            db=db,
+        )
+        if overlay_updates:
+            db.commit()
+    except Exception as e:
+        print(
+            f"[PF] error while overlaying Skynet SP for {target_date}: "
+            f"{repr(e)}"
+        )
+
+    # ----------------------------------------
+    # 5) Backfill TipOutcome rows from RaceResult
     # ----------------------------------------
     try:
         attached = _attach_tip_outcomes_from_existing_results_for_date(

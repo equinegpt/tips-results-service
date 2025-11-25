@@ -59,6 +59,79 @@ def _pf_post_json(url: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # -----------------------
 # Helpers
 # -----------------------
+from sqlalchemy.orm import Session
+from datetime import date as date_type
+from decimal import Decimal
+
+from . import models  # make sure this import exists at top of pf_results.py
+
+
+def _apply_skynet_sp_to_existing_results_for_date(
+    target_date: date_type,
+    skynet_prices: dict[tuple[int, int, int], Decimal],
+    db: Session,
+) -> int:
+    """
+    Overlay Skynet tabCurrentPrice onto ANY RaceResult rows we already have
+    (PF or RA) for the given date.
+
+    For each RaceResult row on that date where starting_price is null/0 and
+    the Meeting has a pf_meeting_id, we set:
+
+        starting_price = skynet_prices[(pf_meeting_id, race_number, tab_number)]
+
+    Returns the number of RaceResult rows updated.
+    """
+    if not skynet_prices:
+        print(f"[PF] Skynet overlay: no prices for {target_date}, skipping.")
+        return 0
+
+    rows = (
+        db.query(models.RaceResult, models.Race, models.Meeting)
+        .join(models.Race, models.RaceResult.race_id == models.Race.id)
+        .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
+        .filter(models.Meeting.date == target_date)
+        .all()
+    )
+
+    updated = 0
+
+    for rr, race, meeting in rows:
+        # If we already have a non-zero SP, leave it alone
+        if rr.starting_price is not None:
+            try:
+                if float(rr.starting_price) > 0:
+                    continue
+            except Exception:
+                # If it’s some weird non-numeric value, let Skynet overwrite it
+                pass
+
+        pf_meeting_id = getattr(meeting, "pf_meeting_id", None)
+        if not pf_meeting_id:
+            continue
+
+        key = (int(pf_meeting_id), int(race.race_number or 0), int(rr.tab_number or 0))
+        sp = skynet_prices.get(key)
+        if sp is None:
+            continue
+
+        # Defensive: ignore zero / nonsense
+        try:
+            if float(sp) <= 0:
+                continue
+        except Exception:
+            continue
+
+        rr.starting_price = sp
+        updated += 1
+
+    if updated:
+        print(
+            f"[PF] Skynet overlay: filled starting_price for "
+            f"{updated} RaceResult rows on {target_date}"
+        )
+
+    return updated
 
 def _to_int(value: Any) -> Optional[int]:
     if value is None:
@@ -501,7 +574,76 @@ def _attach_tip_outcomes_from_existing_results_for_date(
         )
 
     return count
+def _apply_skynet_sp_to_existing_results_for_date(
+    target_date: date_type,
+    skynet_prices: dict[tuple[int, int, int], Decimal],
+    db: Session,
+) -> int:
+    """
+    Overlay Skynet tabCurrentPrice onto ANY RaceResult rows we already have
+    (PF or RA) for the given date.
 
+    For each RaceResult row on that date where starting_price is null/0 and
+    the Meeting has a pf_meeting_id, we set:
+
+        starting_price = skynet_prices[(pf_meeting_id, race_number, tab_number)]
+
+    Returns the number of RaceResult rows updated.
+    """
+    if not skynet_prices:
+        print(f"[PF] Skynet overlay: no prices for {target_date}, skipping.")
+        return 0
+
+    rows = (
+        db.query(models.RaceResult, models.Race, models.Meeting)
+        .join(models.Race, models.RaceResult.race_id == models.Race.id)
+        .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
+        .filter(models.Meeting.date == target_date)
+        .all()
+    )
+
+    updated = 0
+
+    for rr, race, meeting in rows:
+        # If we already have a non-zero SP, leave it alone
+        if rr.starting_price is not None:
+            try:
+                if float(rr.starting_price) > 0:
+                    continue
+            except Exception:
+                # Weird value – allow Skynet to overwrite
+                pass
+
+        pf_meeting_id = getattr(meeting, "pf_meeting_id", None)
+        if not pf_meeting_id:
+            continue
+
+        key = (
+            int(pf_meeting_id),
+            int(race.race_number or 0),
+            int(rr.tab_number or 0),
+        )
+
+        sp = skynet_prices.get(key)
+        if sp is None:
+            continue
+
+        try:
+            if float(sp) <= 0:
+                continue
+        except Exception:
+            continue
+
+        rr.starting_price = sp
+        updated += 1
+
+    if updated:
+        print(
+            f"[PF] Skynet overlay: filled starting_price for "
+            f"{updated} RaceResult rows on {target_date}"
+        )
+
+    return updated
 # -----------------------
 # Main import function
 # -----------------------
