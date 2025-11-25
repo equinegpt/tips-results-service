@@ -71,22 +71,31 @@ def cron_fetch_pf_results(
       2) Upsert RaceResult rows (provider='PF') per runner.
       3) Attach Skynet tabCurrentPrice as starting_price via a
          (meetingId, raceNumber, tabNumber) lookup.
-      4) Backfill TipOutcome rows for any Tips that don't yet have one,
-         using the RaceResult rows we just imported.
-
-    Returns how many RaceResult rows were inserted/updated.
+      4) Overlay Skynet SP onto any existing RaceResult (RA or PF) that still
+         has no starting_price.
+      5) Backfill TipOutcome rows from RaceResult.
     """
     target_date = date
     print(f"[CRON] fetch-pf-results for {target_date}")
 
     # ----------------------------------------
-    # 1) Which meetings do we care about?
+    # 1) Meetings for this date
     # ----------------------------------------
-    meetings = (
-        db.query(models.Meeting)
-        .filter(models.Meeting.date == target_date)
-        .all()
-    )
+    try:
+        meetings = (
+            db.query(models.Meeting)
+            .filter(models.Meeting.date == target_date)
+            .all()
+        )
+    except Exception as e:
+        err = f"DB query for meetings failed: {repr(e)}"
+        print(f"[PF] {err}")
+        return schemas.FetchPfResultsOut(
+            ok=False,
+            date=target_date.isoformat(),
+            race_results_inserted=0,
+            error=err,
+        )
 
     if not meetings:
         print(f"[CRON] fetch-pf-results: no meetings for {target_date}")
@@ -94,16 +103,21 @@ def cron_fetch_pf_results(
             ok=True,
             date=target_date.isoformat(),
             race_results_inserted=0,
+            error=None,
         )
 
     # ----------------------------------------
     # 2) Skynet price map for the whole day
-    #     (meetingId, raceNumber, tabNumber) -> tabCurrentPrice
     # ----------------------------------------
     try:
-        skynet_prices = _fetch_skynet_prices_for_date(target_date)
+        skynet_prices = pf_results._fetch_skynet_prices_for_date(target_date)
+        print(
+            f"[DEBUG] Skynet map size for {target_date}: "
+            f"{len(skynet_prices)} entries"
+        )
     except Exception as e:
-        print(f"[PF] Skynet prices fetch failed for {target_date}: {repr(e)}")
+        err = f"Skynet prices fetch failed for {target_date}: {repr(e)}"
+        print(f"[PF] {err}")
         skynet_prices = {}
 
     race_results_inserted = 0
@@ -114,7 +128,7 @@ def cron_fetch_pf_results(
     for meeting in meetings:
         pf_meeting_id = getattr(meeting, "pf_meeting_id", None)
         if not pf_meeting_id:
-            # Nothing we can call PF with
+            # Can't map to PF / Skynet without a meetingId
             continue
 
         print(
@@ -122,13 +136,12 @@ def cron_fetch_pf_results(
             f"{meeting.track_name} {meeting.state} on {meeting.date}"
         )
 
-        for race in sorted(meeting.races, key=lambda r: r.race_number):
+        for race in sorted(meeting.races, key=lambda r: r.race_number or 0):
             race_no = race.race_number
             if race_no is None:
                 continue
 
-            # Pull PF post-race runners for this meeting/race
-            runners = _fetch_pf_post_race(pf_meeting_id, race_no)
+            runners = pf_results._fetch_pf_post_race(pf_meeting_id, race_no)
             if not runners:
                 continue
 
@@ -137,9 +150,13 @@ def cron_fetch_pf_results(
                     continue
 
                 # Normalise core keys
-                meeting_id = _to_int(r.get("meetingId") or pf_meeting_id)
-                race_number = _to_int(r.get("raceNo") or race_no)
-                tab_no = _to_int(r.get("tabNo"))
+                meeting_id = pf_results._to_int(
+                    r.get("meetingId") or pf_meeting_id
+                )
+                race_number = pf_results._to_int(
+                    r.get("raceNo") or race_no
+                )
+                tab_no = pf_results._to_int(r.get("tabNo"))
 
                 if not (meeting_id and race_number and tab_no):
                     continue
@@ -149,15 +166,13 @@ def cron_fetch_pf_results(
                 # -----------------------------
                 sp = skynet_prices.get((meeting_id, race_number, tab_no))
 
-                # Fallback: if Skynet missing, try any SP-ish field from PF
+                # Fallback: any SP-ish field from PF if Skynet missing
                 if sp is None:
-                    sp = _to_decimal(
+                    sp = pf_results._to_decimal(
                         r.get("tabCurrentPrice")
                         or r.get("startingPrice")
                         or r.get("sp")
                     )
-
-                # If still None or 0, we'll just leave starting_price = None
                 if sp is not None and sp == 0:
                     sp = None
 
@@ -183,55 +198,60 @@ def cron_fetch_pf_results(
                     db.add(rr)
                     race_results_inserted += 1
 
-                # Core fields from PF
-                rr.finish_position = _to_int(r.get("posFin"))
+                rr.finish_position = pf_results._to_int(r.get("posFin"))
                 rr.margin = r.get("margFin")
                 rr.starting_price = sp
-                # If you have a JSON/JSONB column for raw PF blob:
                 if hasattr(rr, "raw"):
                     rr.raw = r
 
     db.commit()
 
     # ----------------------------------------
-    # 4) Overlay Skynet SP onto existing RaceResult rows (RA + PF)
+    # 4) Overlay Skynet SP onto any existing rows missing SP (RA or PF)
     # ----------------------------------------
-    try:
-        overlay_updates = _apply_skynet_sp_to_existing_results_for_date(
-            target_date=target_date,
-            skynet_prices=skynet_prices,
-            db=db,
-        )
-        if overlay_updates:
-            db.commit()
-    except Exception as e:
-        print(
-            f"[PF] error while overlaying Skynet SP for {target_date}: "
-            f"{repr(e)}"
-        )
+    overlay_count = 0
+    if skynet_prices:
+        try:
+            overlay_count = pf_results._apply_skynet_sp_to_existing_results_for_date(
+                target_date=target_date,
+                skynet_prices=skynet_prices,
+                db=db,
+            )
+            if overlay_count:
+                db.commit()
+            print(
+                f"[CRON] fetch-pf-results overlay: "
+                f"set SP on {overlay_count} existing RaceResult rows "
+                f"for {target_date}"
+            )
+        except Exception as e:
+            print(
+                f"[PF] error while overlaying Skynet SP for {target_date}: "
+                f"{repr(e)}"
+            )
 
     # ----------------------------------------
     # 5) Backfill TipOutcome rows from RaceResult
     # ----------------------------------------
     try:
-        attached = _attach_tip_outcomes_from_existing_results_for_date(
+        attached = pf_results._attach_tip_outcomes_from_existing_results_for_date(
             target_date, db
         )
         if attached:
             db.commit()
+        print(
+            f"[CRON] fetch-pf-results: attached {attached} TipOutcome rows "
+            f"for {target_date}"
+        )
     except Exception as e:
         print(
             f"[PF] error while attaching TipOutcome rows for {target_date}: "
             f"{repr(e)}"
         )
 
-    print(
-        f"[CRON] fetch-pf-results done for {target_date}: "
-        f"race_results_inserted={race_results_inserted}"
-    )
-
     return schemas.FetchPfResultsOut(
         ok=True,
         date=target_date.isoformat(),
         race_results_inserted=race_results_inserted,
+        error=None,
     )
