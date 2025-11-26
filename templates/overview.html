@@ -58,10 +58,10 @@
             {% if all_tracks %}
               {% for t in all_tracks %}
                 {# Expect: t.code, t.track_name, t.state (objects or dicts both fine) #}
+                {% set t_code = t.code if t.code is defined else t.track_name %}
                 <option
-                  value="{{ t.code if t.code is defined else t.track_name }}"
-                  {% if filter_track_code and filter_track_code ==
-                        (t.code if t.code is defined else t.track_name) %}
+                  value="{{ t_code }}"
+                  {% if filter_track_code and filter_track_code == t_code %}
                     selected
                   {% endif %}
                 >
@@ -76,7 +76,6 @@
         <span class="date-form-label">Focus</span>
         <div class="date-form-input-wrap">
           <select name="bet_focus" id="bet_focus">
-            {# bet_focus: "all" | "wins" | "quinellas" | "trifectas" #}
             <option value="all"
               {% if not bet_focus or bet_focus == "all" %}selected{% endif %}
             >
@@ -218,48 +217,45 @@
             <tbody>
               {% for t in track_stats %}
                 {% set ts = t.summary %}
-                {% if not ts %}
-                  {% continue %}
+                {% if ts %}
+                  {% set ts_strike = ts.get('strike_rate_pct', 0.0) %}
+                  {% set ts_turnover = ts.get('turnover', 0.0) %}
+                  {% set ts_pnl = ts.get('pnl', 0.0) %}
+                  {% set ts_quin = ts.get('quinellas', 0) %}
+                  {% set ts_tri = ts.get('trifectas', 0) %}
+                  {% set ts_roi = (ts_pnl / ts_turnover * 100) if ts_turnover > 0 else 0 %}
+
+                  {% set row_class = "" %}
+                  {% if ts_pnl > 0 and ts_roi >= 10 %}
+                    {% set row_class = "track-row--hot" %}
+                  {% elif ts_pnl < 0 and ts_roi <= -10 %}
+                    {% set row_class = "track-row--cold" %}
+                  {% endif %}
+
+                  <tr class="{{ row_class }}">
+                    <td>
+                      {{ t.track_name if t.track_name is defined else t.name }}
+                    </td>
+                    <td>
+                      {{ t.state if t.state is defined else "?" }}
+                    </td>
+                    <td>{{ ts.get('tips', 0) }}</td>
+                    <td>{{ ts.get('wins', 0) }}</td>
+                    <td>{{ "%.1f"|format(ts_strike) }}</td>
+                    <td>{{ ts_quin }}</td>
+                    <td>{{ ts_tri }}</td>
+                    <td>${{ "%.0f"|format(ts_turnover) }}</td>
+                    <td class="
+                        summary-value--money
+                        {% if ts_pnl < 0 %}summary-value--bad{% elif ts_pnl > 0 %}summary-value--good{% endif %}
+                      ">
+                      ${{ "%.0f"|format(ts_pnl) }}
+                    </td>
+                    <td>
+                      {{ "%.1f"|format(ts_roi) }}%
+                    </td>
+                  </tr>
                 {% endif %}
-
-                {% set ts_strike = ts.get('strike_rate_pct', 0.0) %}
-                {% set ts_turnover = ts.get('turnover', 0.0) %}
-                {% set ts_pnl = ts.get('pnl', 0.0) %}
-                {% set ts_quin = ts.get('quinellas', 0) %}
-                {% set ts_tri = ts.get('trifectas', 0) %}
-                {% set ts_roi = (ts_pnl / ts_turnover * 100) if ts_turnover > 0 else 0 %}
-
-                {# Hot / cold highlighting #}
-                {% set row_class = "" %}
-                {% if ts_pnl > 0 and ts_roi >= 10 %}
-                  {% set row_class = "track-row--hot" %}
-                {% elif ts_pnl < 0 and ts_roi <= -10 %}
-                  {% set row_class = "track-row--cold" %}
-                {% endif %}
-
-                <tr class="{{ row_class }}">
-                  <td>
-                    {{ t.track_name if t.track_name is defined else t.name }}
-                  </td>
-                  <td>
-                    {{ t.state if t.state is defined else "?" }}
-                  </td>
-                  <td>{{ ts.get('tips', 0) }}</td>
-                  <td>{{ ts.get('wins', 0) }}</td>
-                  <td>{{ "%.1f"|format(ts_strike) }}</td>
-                  <td>{{ ts_quin }}</td>
-                  <td>{{ ts_tri }}</td>
-                  <td>${{ "%.0f"|format(ts_turnover) }}</td>
-                  <td class="
-                      summary-value--money
-                      {% if ts_pnl < 0 %}summary-value--bad{% elif ts_pnl > 0 %}summary-value--good{% endif %}
-                    ">
-                    ${{ "%.0f"|format(ts_pnl) }}
-                  </td>
-                  <td>
-                    {{ "%.1f"|format(ts_roi) }}%
-                  </td>
-                </tr>
               {% endfor %}
             </tbody>
           </table>
@@ -302,33 +298,35 @@
             <tbody>
               {% for d in daily_stats %}
                 {% set ds = d.summary %}
-                {% if not ds %}
-                  {% continue %}
+                {% if ds %}
+                  {% set ds_strike = ds.get('strike_rate_pct', 0.0) %}
+                  {% set ds_turnover = ds.get('turnover', 0.0) %}
+                  {% set ds_pnl = ds.get('pnl', 0.0) %}
+                  {% set ds_quin = ds.get('quinellas', 0) %}
+                  {% set ds_tri = ds.get('trifectas', 0) %}
+
+                  <tr>
+                    <td>
+                      {% if d.date %}
+                        {{ d.date.strftime("%a %d %b %Y") }}
+                      {% else %}
+                        –
+                      {% endif %}
+                    </td>
+                    <td>{{ ds.get('tips', 0) }}</td>
+                    <td>{{ ds.get('wins', 0) }}</td>
+                    <td>{{ "%.1f"|format(ds_strike) }}</td>
+                    <td>{{ ds_quin }}</td>
+                    <td>{{ ds_tri }}</td>
+                    <td>${{ "%.0f"|format(ds_turnover) }}</td>
+                    <td class="
+                        summary-value--money
+                        {% if ds_pnl < 0 %}summary-value--bad{% elif ds_pnl > 0 %}summary-value--good{% endif %}
+                      ">
+                      ${{ "%.0f"|format(ds_pnl) }}
+                    </td>
+                  </tr>
                 {% endif %}
-
-                {% set ds_strike = ds.get('strike_rate_pct', 0.0) %}
-                {% set ds_turnover = ds.get('turnover', 0.0) %}
-                {% set ds_pnl = ds.get('pnl', 0.0) %}
-                {% set ds_quin = ds.get('quinellas', 0) %}
-                {% set ds_tri = ds.get('trifectas', 0) %}
-
-                <tr>
-                  <td>
-                    {{ d.date.strftime("%a %d %b %Y") if d.date }}
-                  </td>
-                  <td>{{ ds.get('tips', 0) }}</td>
-                  <td>{{ ds.get('wins', 0) }}</td>
-                  <td>{{ "%.1f"|format(ds_strike) }}</td>
-                  <td>{{ ds_quin }}</td>
-                  <td>{{ ds_tri }}</td>
-                  <td>${{ "%.0f"|format(ds_turnover) }}</td>
-                  <td class="
-                      summary-value--money
-                      {% if ds_pnl < 0 %}summary-value--bad{% elif ds_pnl > 0 %}summary-value--good{% endif %}
-                    ">
-                    ${{ "%.0f"|format(ds_pnl) }}
-                  </td>
-                </tr>
               {% endfor %}
             </tbody>
           </table>
