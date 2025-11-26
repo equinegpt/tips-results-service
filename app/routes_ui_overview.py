@@ -8,10 +8,9 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.database import get_db
-from app.models import Tip, Meeting
+from app.models import Tip
 from app.summary import (
     build_summary,
     build_track_stats,
@@ -47,11 +46,7 @@ def tips_overview(
         from_date = to_date - timedelta(days=13)
 
     # 2) Base query: all tips in range, joined to Meeting for track/state
-    q = (
-        db.query(Tip)
-        .join(Tip.meeting)
-        .filter(Tip.date >= from_date, Tip.date <= to_date)
-    )
+    q = db.query(Tip).filter(Tip.date >= from_date, Tip.date <= to_date)
 
     # 3) Track filter – track_code is "state|track" lowercased
     if track_code:
