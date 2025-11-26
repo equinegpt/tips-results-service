@@ -13,21 +13,20 @@ from .routes_stats import router as stats_router
 from .routes_admin import router as admin_router
 from .routes_cron import router as cron_router
 from .routes_ui import router as ui_router
+from .routes_ui_overview import router as ui_overview_router
 from .routes_debug import router as debug_router
 
-# Create DB schema (same as before)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title=settings.app_name)
 
-# Static files (CSS, logo, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Register routers
 app.include_router(health_router)
 app.include_router(tips_router)
 app.include_router(stats_router)
 app.include_router(admin_router)
 app.include_router(cron_router)
 app.include_router(ui_router)
+app.include_router(ui_overview_router)
 app.include_router(debug_router)

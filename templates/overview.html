@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Tips overview
+{% endblock %}
+
+{% block body %}
+<main class="page-root">
+
+  {# -------------------- HEADER: LOGO + FILTERS -------------------- #}
+  <header class="page-header">
+    <div class="page-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            Tips overview
+          </div>
+          <div class="brand-subtitle">
+            Tips Results Service · {{ display_range or "All time" }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-header-right">
+      <form class="date-form" method="get" action="/ui/overview">
+        <span class="date-form-label">From</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">📅</span>
+          <input
+            type="date"
+            id="from_date"
+            name="from_date"
+            value="{{ from_date.isoformat() if from_date }}"
+          />
+        </div>
+
+        <span class="date-form-label">To</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">📅</span>
+          <input
+            type="date"
+            id="to_date"
+            name="to_date"
+            value="{{ to_date.isoformat() if to_date }}"
+          />
+        </div>
+
+        <span class="date-form-label">Track</span>
+        <div class="date-form-input-wrap">
+          <select name="track_code" id="track_code">
+            <option value="">All tracks</option>
+            {% if all_tracks %}
+              {% for t in all_tracks %}
+                {# Expect: t.code, t.track_name, t.state (objects or dicts both fine) #}
+                <option
+                  value="{{ t.code if t.code is defined else t.track_name }}"
+                  {% if filter_track_code and filter_track_code ==
+                        (t.code if t.code is defined else t.track_name) %}
+                    selected
+                  {% endif %}
+                >
+                  {{ t.track_name if t.track_name is defined else t.name }}
+                  {% if t.state is defined %} ({{ t.state }}){% endif %}
+                </option>
+              {% endfor %}
+            {% endif %}
+          </select>
+        </div>
+
+        <span class="date-form-label">Focus</span>
+        <div class="date-form-input-wrap">
+          <select name="bet_focus" id="bet_focus">
+            {# bet_focus: "all" | "wins" | "quinellas" | "trifectas" #}
+            <option value="all"
+              {% if not bet_focus or bet_focus == "all" %}selected{% endif %}
+            >
+              All
+            </option>
+            <option value="wins"
+              {% if bet_focus == "wins" %}selected{% endif %}
+            >
+              Wins
+            </option>
+            <option value="quinellas"
+              {% if bet_focus == "quinellas" %}selected{% endif %}
+            >
+              Quinellas
+            </option>
+            <option value="trifectas"
+              {% if bet_focus == "trifectas" %}selected{% endif %}
+            >
+              Trifectas
+            </option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn-go">Apply</button>
+      </form>
+    </div>
+  </header>
+
+  {% if not has_data %}
+    <p class="empty-state">No results found for the selected filters.</p>
+  {% else %}
+
+    {# -------------------- OVERALL SUMMARY CARD -------------------- #}
+    {% if overall_summary %}
+      {% set os = overall_summary %}
+      {% set os_strike = os.get('strike_rate_pct', 0.0) %}
+      {% set os_turnover = os.get('turnover', 0.0) %}
+      {% set os_pnl = os.get('pnl', 0.0) %}
+      {% set os_quin = os.get('quinellas', 0) %}
+      {% set os_tri = os.get('trifectas', 0) %}
+
+      <section class="meeting-card meeting-card--summary">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">
+                  Overall summary
+                </h2>
+              </div>
+              <div class="meeting-meta">
+                Performance across {{ os.get('days', "?") }} day(s),
+                {{ os.get('tracks', "?") }} track(s)
+                {% if bet_focus and bet_focus != "all" %}
+                  · Focus: {{ bet_focus|capitalize }}
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <div class="summary-grid summary-grid--day">
+            <div class="summary-item">
+              <div class="summary-label">TIPS</div>
+              <div class="summary-value">{{ os.get('tips', 0) }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">WINNERS</div>
+              <div class="summary-value">{{ os.get('wins', 0) }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">STRIKE RATE</div>
+              <div class="summary-value">
+                {{ "%.1f"|format(os_strike) }}%
+              </div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">TURNOVER</div>
+              <div class="summary-value summary-value--money">
+                ${{ "%.0f"|format(os_turnover) }}
+              </div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">P&L</div>
+              <div class="summary-value summary-value--money
+                          {% if os_pnl < 0 %}summary-value--bad{% elif os_pnl > 0 %}summary-value--good{% endif %}">
+                ${{ "%.0f"|format(os_pnl) }}
+              </div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">QUINELLAS</div>
+              <div class="summary-value">{{ os_quin }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">TRIFECTAS</div>
+              <div class="summary-value">{{ os_tri }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- TRACK PERFORMANCE -------------------- #}
+    {% if track_stats and track_stats|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">
+                  Track performance
+                </h2>
+              </div>
+              <div class="meeting-meta">
+                Highlights tracks where we are winning vs. struggling.
+                Green rows = hot tracks, red rows = tough tracks.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Track</th>
+                <th>State</th>
+                <th>TIPS</th>
+                <th>WIN</th>
+                <th>SR%</th>
+                <th>QUIN</th>
+                <th>TRI</th>
+                <th>Turnover</th>
+                <th>P&L</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in track_stats %}
+                {% set ts = t.summary %}
+                {% if not ts %}
+                  {% continue %}
+                {% endif %}
+
+                {% set ts_strike = ts.get('strike_rate_pct', 0.0) %}
+                {% set ts_turnover = ts.get('turnover', 0.0) %}
+                {% set ts_pnl = ts.get('pnl', 0.0) %}
+                {% set ts_quin = ts.get('quinellas', 0) %}
+                {% set ts_tri = ts.get('trifectas', 0) %}
+                {% set ts_roi = (ts_pnl / ts_turnover * 100) if ts_turnover > 0 else 0 %}
+
+                {# Hot / cold highlighting #}
+                {% set row_class = "" %}
+                {% if ts_pnl > 0 and ts_roi >= 10 %}
+                  {% set row_class = "track-row--hot" %}
+                {% elif ts_pnl < 0 and ts_roi <= -10 %}
+                  {% set row_class = "track-row--cold" %}
+                {% endif %}
+
+                <tr class="{{ row_class }}">
+                  <td>
+                    {{ t.track_name if t.track_name is defined else t.name }}
+                  </td>
+                  <td>
+                    {{ t.state if t.state is defined else "?" }}
+                  </td>
+                  <td>{{ ts.get('tips', 0) }}</td>
+                  <td>{{ ts.get('wins', 0) }}</td>
+                  <td>{{ "%.1f"|format(ts_strike) }}</td>
+                  <td>{{ ts_quin }}</td>
+                  <td>{{ ts_tri }}</td>
+                  <td>${{ "%.0f"|format(ts_turnover) }}</td>
+                  <td class="
+                      summary-value--money
+                      {% if ts_pnl < 0 %}summary-value--bad{% elif ts_pnl > 0 %}summary-value--good{% endif %}
+                    ">
+                    ${{ "%.0f"|format(ts_pnl) }}
+                  </td>
+                  <td>
+                    {{ "%.1f"|format(ts_roi) }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- DAY-BY-DAY PERFORMANCE -------------------- #}
+    {% if daily_stats and daily_stats|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">
+                  Day-by-day performance
+                </h2>
+              </div>
+              <div class="meeting-meta">
+                Quick view of which days are driving the P&L.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>TIPS</th>
+                <th>WIN</th>
+                <th>SR%</th>
+                <th>QUIN</th>
+                <th>TRI</th>
+                <th>Turnover</th>
+                <th>P&L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in daily_stats %}
+                {% set ds = d.summary %}
+                {% if not ds %}
+                  {% continue %}
+                {% endif %}
+
+                {% set ds_strike = ds.get('strike_rate_pct', 0.0) %}
+                {% set ds_turnover = ds.get('turnover', 0.0) %}
+                {% set ds_pnl = ds.get('pnl', 0.0) %}
+                {% set ds_quin = ds.get('quinellas', 0) %}
+                {% set ds_tri = ds.get('trifectas', 0) %}
+
+                <tr>
+                  <td>
+                    {{ d.date.strftime("%a %d %b %Y") if d.date }}
+                  </td>
+                  <td>{{ ds.get('tips', 0) }}</td>
+                  <td>{{ ds.get('wins', 0) }}</td>
+                  <td>{{ "%.1f"|format(ds_strike) }}</td>
+                  <td>{{ ds_quin }}</td>
+                  <td>{{ ds_tri }}</td>
+                  <td>${{ "%.0f"|format(ds_turnover) }}</td>
+                  <td class="
+                      summary-value--money
+                      {% if ds_pnl < 0 %}summary-value--bad{% elif ds_pnl > 0 %}summary-value--good{% endif %}
+                    ">
+                    ${{ "%.0f"|format(ds_pnl) }}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+  {% endif %}
+</main>
+{% endblock %}

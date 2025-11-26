@@ -349,6 +349,14 @@ body {
   background: #444;
 }
 
+.track-table tr.track-row--hot {
+  background-color: rgba(24, 203, 150, 0.08); /* subtle Stablfy green wash */
+}
+
+.track-table tr.track-row--cold {
+  background-color: rgba(220, 38, 38, 0.06);  /* soft red wash */
+}
+
 /* --- Race cards --- */
 
 .race-card {

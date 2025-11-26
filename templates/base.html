@@ -28,3 +28,11 @@
     </script>
   </body>
 </html>
+<nav class="top-nav">
+  <a href="/ui/day?date={{ date.isoformat() if date is defined else '' }}" class="nav-link">
+    Day view
+  </a>
+  <a href="/ui/overview" class="nav-link">
+    Overview
+  </a>
+</nav>
