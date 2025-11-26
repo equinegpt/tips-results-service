@@ -34,33 +34,32 @@ def tips_overview(
     """
     Overview dashboard across multiple days and tracks.
 
-    - Filters by date range + optional track_code.
-    - bet_focus controls how we sort the track table (wins vs quinellas vs trifectas vs P&L).
+    NOTE: We do NOT filter on Tip.date here because Tip has no `date` field.
+    Once the correct date/meeting linkage is confirmed, we can tighten this
+    to a real date/track filter.
     """
 
-    # 1) Normalise dates – default to last 14 days
+    # 1) Normalise dates – default to last 14 days (still used for display only)
     today = date.today()
     if not to_date:
         to_date = today
     if not from_date:
         from_date = to_date - timedelta(days=13)
 
-    # 2) Base query: all tips in range, joined to Meeting for track/state
-    q = db.query(Tip).filter(Tip.date >= from_date, Tip.date <= to_date)
+    display_range = f"{from_date:%d %b %Y} – {to_date:%d %b %Y}"
 
-    # 3) Track filter – track_code is "state|track" lowercased
-    if track_code:
-        state_part, _, track_part = track_code.partition("|")
-        if state_part and track_part:
-            q = q.filter(
-                func.lower(Meeting.state) == state_part.lower(),
-                func.lower(Meeting.track_name) == track_part.lower(),
-            )
+    # 2) Base query: all tips (no Tip.date filter – Tip doesn't have that field)
+    q = db.query(Tip)
+
+    # 3) Track filter – currently not applied because we don't yet have a
+    #    reliable track/date linkage on Tip. We still pass `track_code` through
+    #    to the template so the UI can show the selected value.
+    #
+    # Once Tip is linked to Meeting (or exposes track_name/state/date), we can
+    # re-enable a real filter here.
 
     tip_rows = q.all()
     has_data = len(tip_rows) > 0
-
-    display_range = f"{from_date:%d %b %Y} – {to_date:%d %b %Y}"
 
     # Always provide tracks + filters for the template
     all_tracks = get_all_tracks(db)
