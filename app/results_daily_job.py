@@ -1,265 +1,277 @@
-# results_daily_job.py
+# app/results_daily_job.py
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from decimal import Decimal
-from typing import Any, Dict, Optional
-from zoneinfo import ZoneInfo
+from typing import Dict, Iterable, Tuple
 
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
-from app.models import Meeting, Race, Tip, RaceResult, TipOutcome
-from ra_results_client import RAResultsClient
+from .database import SessionLocal
+from .models import Meeting, Race, Tip, RaceResult, TipOutcome
+from .ra_results_client import RAResultsClient, RAResultRow
 
 
-# ---------- Helpers ----------
+# ---------- helpers ----------
 
 def _today_melb() -> date:
     return datetime.now(ZoneInfo("Australia/Melbourne")).date()
 
 
-def _get_field(row: Dict[str, Any], *names: str, default: Any = None) -> Any:
+def _canonical_track_name(raw: str) -> str:
     """
-    Convenience helper: try several key names (snake/camel) on a row.
+    Canonicalise track names so RA (crawler) and PF (Meetings in this DB)
+    line up.
+
+    This mirrors the logic we used in the RA crawler's meeting_id backfill.
     """
-    for n in names:
-        if n in row:
-            return row[n]
-    return default
+    import re
+
+    if not raw:
+        return ""
+
+    s = raw.strip().lower()
+    s = re.sub(r"[-,/]", " ", s)          # normalise separators
+    s = re.sub(r"\s+", " ", s)            # collapse spaces
+
+    # Strip sponsors / fluff
+    sponsors = [
+        "sportsbet",
+        "ladbrokes",
+        "bet365",
+        "picklebet",
+        "thomas farms",
+        "aquis park",
+        "aquis",
+        "tabtouch",
+        "tab ",
+    ]
+    for sp in sponsors:
+        s = s.replace(sp, "")
+
+    junk_words = [
+        "rc",
+        "racecourse",
+        "raceway",
+        "race club",
+        "race club inc",
+        "race club incorporated",
+        "park",
+        "gh",
+    ]
+    for jw in junk_words:
+        s = s.replace(f" {jw} ", " ")
+        if s.endswith(f" {jw}"):
+            s = s[: -len(f" {jw}")]
+        if s.startswith(f"{jw} "):
+            s = s[len(f"{jw} "):]
+
+    s = " ".join(s.split())
+
+    # Southside variants → plain track
+    if s.startswith("southside cranbourne"):
+        return "cranbourne"
+    if s.startswith("southside pakenham"):
+        return "pakenham"
+
+    # Yarra / Yarra Valley
+    if "yarra valley" in s:
+        return "yarra glen"
+
+    # Port Lincoln sponsor variants
+    if "port lincoln" in s:
+        return "port lincoln"
+
+    # Mt/Mount normalisation
+    if s.startswith("mt "):
+        s = "mount " + s[len("mt ") :]
+
+    # Darwin / Fannie Bay quirks:
+    # RA uses "Darwin" in program; PF calls it "Fannie Bay".
+    if s == "darwin":
+        return "fannie bay"
+
+    return s
 
 
-def _to_decimal(value: Any) -> Optional[Decimal]:
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return None
+def _status_from_result(rr: RAResultRow) -> str:
+    if rr.is_scratched:
+        return "SCRATCHED"
+    if rr.finishing_pos is None:
+        return "NO_RESULT"
+    return "RUN"
 
 
-# ---------- Core logic ----------
+def _tip_outcome_status(rr: RAResultRow) -> str:
+    if rr.is_scratched:
+        return "SCRATCHED"
+    if rr.finishing_pos is None:
+        return "NO_RESULT"
+    if rr.finishing_pos == 1:
+        return "WIN"
+    if rr.finishing_pos in (2, 3):
+        return "PLACE"
+    return "LOSE"
 
-def _upsert_race_result(
-    session: Session,
-    race_id: str,
-    row: Dict[str, Any],
-) -> RaceResult:
+
+# ---------- core wiring ----------
+
+def _build_meeting_race_maps(db: Session, d: date) -> Tuple[
+    Dict[tuple[str, str], Meeting],
+    Dict[tuple[str, int], Race],
+]:
     """
-    Take one RA result row (from RA-crawler) and upsert into RaceResult.
-    We key by (provider='RA', race_id, tab_number).
+    For a given date, build:
+
+      meetings[(STATE, canon_track)] -> Meeting
+      races[(meeting_id, race_number)] -> Race
     """
-
-    tab_number = _get_field(row, "tab_number", "tabNumber")
-    if tab_number is None:
-        raise ValueError(f"Missing tab_number in RA result row: {row!r}")
-
-    horse_name = _get_field(row, "horse_name", "horseName", default="Unknown")
-    finish_pos = _get_field(row, "finishing_pos", "finishPosition")
-    is_scratched = bool(_get_field(row, "is_scratched", "scratched", default=False))
-    margin = _get_field(row, "margin_lens", "margin")
-    sp_raw = _get_field(row, "starting_price", "startingPrice")
-
-    rr: RaceResult | None = (
-        session.query(RaceResult)
-        .filter(
-            RaceResult.provider == "RA",
-            RaceResult.race_id == race_id,
-            RaceResult.tab_number == int(tab_number),
-        )
-        .one_or_none()
-    )
-
-    if rr is None:
-        rr = RaceResult(
-            provider="RA",
-            race_id=race_id,
-            tab_number=int(tab_number),
-            horse_name=str(horse_name),
-        )
-        session.add(rr)
-
-    # Update fields
-    rr.horse_name = str(horse_name)
-
-    if finish_pos is not None:
-        try:
-            rr.finish_position = int(finish_pos)
-        except Exception:
-            rr.finish_position = None
-    else:
-        rr.finish_position = None
-
-    rr.status = "SCRATCHED" if is_scratched else "RUN"
-
-    rr.margin_text = str(margin) if margin not in (None, "") else None
-    rr.starting_price = _to_decimal(sp_raw)
-
-    return rr
-
-
-def _compute_outcome_from_result(rr: Optional[RaceResult]) -> Dict[str, Any]:
-    """
-    Given a RaceResult (or None), compute TipOutcome columns:
-      - outcome_status
-      - finish_position
-      - starting_price
-      - race_result_id
-    """
-    if rr is None:
-        return {
-            "outcome_status": "NO_RESULT",
-            "finish_position": None,
-            "starting_price": None,
-            "race_result_id": None,
-        }
-
-    if rr.status == "SCRATCHED":
-        return {
-            "outcome_status": "SCRATCHED",
-            "finish_position": None,
-            "starting_price": rr.starting_price,
-            "race_result_id": rr.id,
-        }
-
-    pos = rr.finish_position
-    if pos == 1:
-        status = "WIN"
-    elif pos in (2, 3):
-        status = "PLACE"
-    elif pos is None:
-        status = "NO_RESULT"
-    else:
-        status = "LOSE"
-
-    return {
-        "outcome_status": status,
-        "finish_position": pos,
-        "starting_price": rr.starting_price,
-        "race_result_id": rr.id,
-    }
-
-
-def _process_day(session: Session, target_date: date, client: RAResultsClient) -> None:
-    print(f"[results_daily_job] Fetching RA results for {target_date.isoformat()}")
-
-    rows = client.fetch_results_for_date(target_date)
-    print(f"[results_daily_job] {target_date}: received {len(rows)} row(s) from RA crawler")
-
-    if not rows:
-        return
-
-    # 1) Build a map (meetingId, raceNo) -> Race.id in our DB
-    #    so we can attach RA results to our Race rows.
     meetings = (
-        session.query(Meeting)
-        .filter(Meeting.date == target_date)
+        db.query(Meeting)
+        .filter(Meeting.date == d)
         .all()
     )
 
-    meeting_by_pf_id: dict[int, Meeting] = {}
+    meeting_map: Dict[tuple[str, str], Meeting] = {}
     for m in meetings:
-        if m.pf_meeting_id is not None:
-            meeting_by_pf_id[int(m.pf_meeting_id)] = m
+        key = (m.state.upper(), _canonical_track_name(m.track_name))
+        meeting_map[key] = m
 
     races = (
-        session.query(Race)
-        .filter(Race.meeting_id.in_([m.id for m in meetings]) if meetings else False)
+        db.query(Race)
+        .filter(Race.meeting_id.in_([m.id for m in meetings]))
         .all()
     )
-
-    race_index: dict[tuple[int, int], Race] = {}  # (pf_meeting_id, race_number) -> Race
-    pf_id_by_meeting: dict[str, int] = {
-        m.id: int(m.pf_meeting_id) for m in meetings if m.pf_meeting_id is not None
-    }
+    race_map: Dict[tuple[str, int], Race] = {}
     for r in races:
-        pf_mid = pf_id_by_meeting.get(r.meeting_id)
-        if pf_mid is None:
-            continue
-        race_index[(pf_mid, int(r.race_number))] = r
+        race_map[(r.meeting_id, r.race_number)] = r
 
-    # 2) Upsert RaceResult rows from RA payload
-    race_results_by_race_tab: dict[tuple[str, int], RaceResult] = {}
+    return meeting_map, race_map
 
-    for row in rows:
-        # meetingId should be coming from RA-crawler /results (joined via race_program).
-        meeting_id_raw = _get_field(row, "meetingId", "meeting_id")
-        race_no = _get_field(row, "race_no", "raceNo")
-        if meeting_id_raw is None or race_no is None:
-            # Can't attach to a race; skip
-            continue
 
-        try:
-            pf_meeting_id = int(meeting_id_raw)
-            race_no_int = int(race_no)
-        except Exception:
-            continue
+def _apply_results_for_date(db: Session, d: date, ra_rows: Iterable[RAResultRow]) -> None:
+    meeting_map, race_map = _build_meeting_race_maps(db, d)
 
-        race = race_index.get((pf_meeting_id, race_no_int))
-        if not race:
-            # Our Tips DB might not have this race (e.g. non-TAB / not in tips); skip.
-            continue
-
-        rr = _upsert_race_result(session, race.id, row)
-        race_results_by_race_tab[(race.id, rr.tab_number)] = rr
-
-    # 3) For all tips on that date, compute TipOutcome based on RaceResult
-    tips = (
-        session.query(Tip)
-        .join(Race, Tip.race_id == Race.id)
-        .join(Meeting, Race.meeting_id == Meeting.id)
-        .filter(Meeting.date == target_date)
-        .all()
-    )
-
+    upserted_results = 0
     updated_outcomes = 0
-    for tip in tips:
-        key = (tip.race_id, tip.tab_number)
-        rr = race_results_by_race_tab.get(key)
 
-        outcome = _compute_outcome_from_result(rr)
+    for rr in ra_rows:
+        m_key = (rr.state.upper(), _canonical_track_name(rr.track))
+        meeting = meeting_map.get(m_key)
+        if not meeting:
+            # You'll see these in Render logs if our canon mapping misses something.
+            print(
+                f"[results_daily_job] WARN no Meeting match for {d} "
+                f"{rr.state} '{rr.track}' (canon='{m_key[1]}')"
+            )
+            continue
 
-        tobj: TipOutcome | None = session.get(TipOutcome, tip.id)
-        if tobj is None:
-            tobj = TipOutcome(tip_id=tip.id)
-            session.add(tobj)
+        race = race_map.get((meeting.id, rr.race_no))
+        if not race:
+            print(
+                f"[results_daily_job] WARN no Race match for {d} {rr.state} "
+                f"{rr.track} R{rr.race_no}"
+            )
+            continue
 
-        tobj.provider = "RA"
-        tobj.race_result_id = outcome["race_result_id"]
-        tobj.finish_position = outcome["finish_position"]
-        tobj.outcome_status = outcome["outcome_status"]
-        tobj.starting_price = outcome["starting_price"]
+        # ----- Upsert RaceResult -----
+        result = (
+            db.query(RaceResult)
+            .filter(
+                RaceResult.provider == "RA",
+                RaceResult.race_id == race.id,
+                RaceResult.tab_number == rr.tab_number,
+            )
+            .one_or_none()
+        )
 
-        updated_outcomes += 1
+        if result is None:
+            result = RaceResult(
+                provider="RA",
+                race_id=race.id,
+                tab_number=rr.tab_number,
+                horse_name=rr.horse_name,
+            )
+            db.add(result)
+        else:
+            result.horse_name = rr.horse_name
+
+        result.finish_position = rr.finishing_pos
+        result.status = _status_from_result(rr)
+        result.margin_text = (
+            f"{rr.margin_lens:.2f}L" if rr.margin_lens is not None else None
+        )
+        result.starting_price = rr.starting_price
+        upserted_results += 1
+
+        # ----- Wire into TipOutcome for any Tips on this runner -----
+        tips = (
+            db.query(Tip)
+            .filter(
+                Tip.race_id == race.id,
+                Tip.tab_number == rr.tab_number,
+            )
+            .all()
+        )
+
+        for tip in tips:
+            # Primary key is tip_id
+            outcome = db.query(TipOutcome).get(tip.id)
+            if outcome is None:
+                outcome = TipOutcome(
+                    tip_id=tip.id,
+                    provider="RA",
+                    race_result=result,
+                )
+                db.add(outcome)
+            else:
+                outcome.provider = "RA"
+                outcome.race_result = result
+
+            outcome.finish_position = rr.finishing_pos
+            outcome.outcome_status = _tip_outcome_status(rr)
+            outcome.starting_price = rr.starting_price
+            updated_outcomes += 1
 
     print(
-        f"[results_daily_job] {target_date}: "
-        f"race_results_upserted={len(race_results_by_race_tab)}, "
-        f"tip_outcomes_updated={updated_outcomes}"
+        f"[results_daily_job] Applied results for {d}: "
+        f"RaceResult upserts={upserted_results}, TipOutcome updates={updated_outcomes}"
     )
 
 
-def run_daily() -> None:
+def run() -> None:
     """
-    Entry point for scripts/results_daily.sh.
+    Entry point for cron (and scripts/results_daily.sh).
 
-    Strategy:
-      - Run for today (Melbourne) and yesterday.
-        (Covers late results and soft retries.)
+    We process yesterday + today (Melbourne time) so late results
+    are still picked up.
     """
     today = _today_melb()
-    days = [today - timedelta(days=1), today]
+    dates = [today - timedelta(days=1), today]
 
     client = RAResultsClient()
-    db: Session = SessionLocal()
-
     try:
-        for d in days:
-            _process_day(db, d, client)
-        db.commit()
+        for d in dates:
+            print(f"[results_daily_job] Fetching RA results for {d}")
+            rows = client.fetch_results_for_date(d)
+            print(
+                f"[results_daily_job] {d}: received {len(rows)} row(s) "
+                f"from RA crawler"
+            )
+            if not rows:
+                continue
+
+            db: Session = SessionLocal()
+            try:
+                _apply_results_for_date(db, d, rows)
+                db.commit()
+            finally:
+                db.close()
     finally:
-        db.close()
+        client.close()
+
+    print("[results_daily_job] Done.")
 
 
 if __name__ == "__main__":
-    run_daily()
+    run()
