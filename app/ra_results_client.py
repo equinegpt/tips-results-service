@@ -1,53 +1,45 @@
-# app/ra_results_client.py
+# ra_results_client.py
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from datetime import date
-from typing import List, Optional
+from typing import Any, Dict, List
 
-import requests
+import httpx
 
-
-RA_CRAWLER_BASE_URL = os.getenv(
-    "RA_CRAWLER_BASE_URL",
-    "https://ra-crawler.onrender.com",
-)
+DEFAULT_BASE_URL = "https://ra-crawler.onrender.com"
 
 
-@dataclass
-class RAResultRow:
-    meeting_date: date
-    state: str
-    track: str
-    race_no: int
-    horse_number: int
-    horse_name: str
-    finishing_pos: Optional[int]
-    is_scratched: bool
-    margin_lens: Optional[float]
-    starting_price: Optional[float]
+class RAResultsClient:
+    """
+    Thin HTTP client for the RA-crawler /results endpoint.
 
-    @classmethod
-    def from_json(cls, payload: dict) -> "RAResultRow":
-        return cls(
-            meeting_date=date.fromisoformat(payload["meeting_date"]),
-            state=payload["state"],
-            track=payload["track"],
-            race_no=payload["race_no"],
-            horse_number=payload["horse_number"],
-            horse_name=payload["horse_name"],
-            finishing_pos=payload.get("finishing_pos"),
-            is_scratched=payload.get("is_scratched", False),
-            margin_lens=payload.get("margin_lens"),
-            starting_price=payload.get("starting_price"),
-        )
+    It expects either:
+      - a bare JSON list: [ { ...row... }, ... ]
+      - or a dict with 'results': [ { ...row... }, ... ]
+    """
 
+    def __init__(self, base_url: str | None = None, timeout: float = 10.0) -> None:
+        self.base_url = base_url or os.getenv("RA_CRAWLER_BASE_URL", DEFAULT_BASE_URL)
+        self.timeout = timeout
 
-def fetch_results_for_date(meeting_date: date) -> List[RAResultRow]:
-    url = f"{RA_CRAWLER_BASE_URL}/results"
-    params = {"date": meeting_date.isoformat()}
-    resp = requests.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    return [RAResultRow.from_json(row) for row in data]
+    def fetch_results_for_date(self, d: date) -> List[Dict[str, Any]]:
+        url = self.base_url.rstrip("/") + "/results"
+        params = {"date": d.isoformat()}
+
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Handle a couple of reasonable shapes
+        if isinstance(data, list):
+            return data
+
+        if isinstance(data, dict):
+            if isinstance(data.get("results"), list):
+                return data["results"]
+            if isinstance(data.get("items"), list):
+                return data["items"]
+
+        raise ValueError(f"Unexpected /results payload shape: {type(data)}")
