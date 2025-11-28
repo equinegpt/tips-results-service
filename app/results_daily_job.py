@@ -1,6 +1,7 @@
 # app/results_daily_job.py
 from __future__ import annotations
 
+import sys
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, Tuple
 
@@ -13,6 +14,7 @@ from .ra_results_client import RAResultsClient, RAResultRow
 
 
 # ---------- helpers ----------
+
 
 def _today_melb() -> date:
     return datetime.now(ZoneInfo("Australia/Melbourne")).date()
@@ -31,8 +33,8 @@ def _canonical_track_name(raw: str) -> str:
         return ""
 
     s = raw.strip().lower()
-    s = re.sub(r"[-,/]", " ", s)          # normalise separators
-    s = re.sub(r"\s+", " ", s)            # collapse spaces
+    s = re.sub(r"[-,/]", " ", s)  # normalise separators
+    s = re.sub(r"\s+", " ", s)    # collapse spaces
 
     # Strip sponsors / fluff
     sponsors = [
@@ -84,10 +86,10 @@ def _canonical_track_name(raw: str) -> str:
 
     # Mt/Mount normalisation
     if s.startswith("mt "):
-        s = "mount " + s[len("mt ") :]
+        s = "mount " + s[len("mt "):]
 
     # Darwin / Fannie Bay quirks:
-    # RA uses "Darwin" in program; PF calls it "Fannie Bay".
+    # RA may use "Darwin" in program; PF calls it "Fannie Bay".
     if s == "darwin":
         return "fannie bay"
 
@@ -116,26 +118,25 @@ def _tip_outcome_status(rr: RAResultRow) -> str:
 
 # ---------- core wiring ----------
 
-def _build_meeting_race_maps(db: Session, d: date) -> Tuple[
-    Dict[tuple[str, str], Meeting],
-    Dict[tuple[str, int], Race],
-]:
+
+def _build_meeting_race_maps(
+    db: Session, d: date
+) -> Tuple[Dict[tuple[str, str], Meeting], Dict[tuple[str, int], Race]]:
     """
     For a given date, build:
 
       meetings[(STATE, canon_track)] -> Meeting
       races[(meeting_id, race_number)] -> Race
     """
-    meetings = (
-        db.query(Meeting)
-        .filter(Meeting.date == d)
-        .all()
-    )
+    meetings = db.query(Meeting).filter(Meeting.date == d).all()
 
     meeting_map: Dict[tuple[str, str], Meeting] = {}
     for m in meetings:
         key = (m.state.upper(), _canonical_track_name(m.track_name))
         meeting_map[key] = m
+
+    if not meetings:
+        return meeting_map, {}
 
     races = (
         db.query(Race)
@@ -149,7 +150,11 @@ def _build_meeting_race_maps(db: Session, d: date) -> Tuple[
     return meeting_map, race_map
 
 
-def _apply_results_for_date(db: Session, d: date, ra_rows: Iterable[RAResultRow]) -> None:
+def _apply_results_for_date(
+    db: Session,
+    d: date,
+    ra_rows: Iterable[RAResultRow],
+) -> None:
     meeting_map, race_map = _build_meeting_race_maps(db, d)
 
     upserted_results = 0
@@ -159,7 +164,8 @@ def _apply_results_for_date(db: Session, d: date, ra_rows: Iterable[RAResultRow]
         m_key = (rr.state.upper(), _canonical_track_name(rr.track))
         meeting = meeting_map.get(m_key)
         if not meeting:
-            # You'll see these in Render logs if our canon mapping misses something.
+            # You'll see these in Render logs if our canon mapping misses something,
+            # or if we simply never stored a Meeting row for that track/date.
             print(
                 f"[results_daily_job] WARN no Meeting match for {d} "
                 f"{rr.state} '{rr.track}' (canon='{m_key[1]}')"
@@ -215,8 +221,8 @@ def _apply_results_for_date(db: Session, d: date, ra_rows: Iterable[RAResultRow]
         )
 
         for tip in tips:
-            # Primary key is tip_id
-            outcome = db.query(TipOutcome).get(tip.id)
+            # PK is tip_id; use Session.get to avoid legacy warning
+            outcome = db.get(TipOutcome, tip.id)
             if outcome is None:
                 outcome = TipOutcome(
                     tip_id=tip.id,
@@ -239,39 +245,79 @@ def _apply_results_for_date(db: Session, d: date, ra_rows: Iterable[RAResultRow]
     )
 
 
-def run() -> None:
-    """
-    Entry point for cron (and scripts/results_daily.sh).
+# ---------- runners ----------
 
-    We process yesterday + today (Melbourne time) so late results
-    are still picked up.
+
+def run_results_for_window(date_from: date, date_to: date) -> None:
     """
-    today = _today_melb()
-    dates = [today - timedelta(days=1), today]
+    Apply RA results for all days in [date_from, date_to] inclusive.
+
+    Safe to run multiple times – RaceResult upsert is idempotent and
+    TipOutcome gets updated in place.
+    """
+    if date_to < date_from:
+        print(
+            f"[results_daily_job] WARN date_to ({date_to}) < date_from ({date_from}); "
+            f"nothing to do."
+        )
+        return
 
     client = RAResultsClient()
+    db: Session = SessionLocal()
+
     try:
-        for d in dates:
+        d = date_from
+        while d <= date_to:
             print(f"[results_daily_job] Fetching RA results for {d}")
             rows = client.fetch_results_for_date(d)
             print(
                 f"[results_daily_job] {d}: received {len(rows)} row(s) "
                 f"from RA crawler"
             )
-            if not rows:
-                continue
-
-            db: Session = SessionLocal()
-            try:
+            if rows:
                 _apply_results_for_date(db, d, rows)
                 db.commit()
-            finally:
-                db.close()
+            d += timedelta(days=1)
     finally:
+        db.close()
         client.close()
 
-    print("[results_daily_job] Done.")
+    print(f"[results_daily_job] Done window {date_from} → {date_to}")
+
+
+def run_results_daily() -> None:
+    """
+    Default behaviour for cron (scripts/results_daily.sh):
+    process yesterday + today (Melbourne time) so late results
+    are still picked up.
+    """
+    today = _today_melb()
+    date_from = today - timedelta(days=1)
+    date_to = today
+    run_results_for_window(date_from, date_to)
+
+
+# ---------- CLI entrypoint ----------
+
+
+def main() -> int:
+    """
+    Usage:
+
+      # normal daily behaviour (yesterday + today; used by cron)
+      python -m app.results_daily_job
+
+      # manual backfill for a window (inclusive)
+      python -m app.results_daily_job 2025-11-21 2025-11-27
+    """
+    if len(sys.argv) == 3:
+        date_from = date.fromisoformat(sys.argv[1])
+        date_to = date.fromisoformat(sys.argv[2])
+        run_results_for_window(date_from, date_to)
+    else:
+        run_results_daily()
+    return 0
 
 
 if __name__ == "__main__":
-    run()
+    raise SystemExit(main())
