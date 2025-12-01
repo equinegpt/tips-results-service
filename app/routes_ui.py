@@ -16,6 +16,7 @@ from .ui_helpers import (
     display_reason,
     format_pretty_date,
 )
+from .ra_results_client import RAResultsClient  # 👈 NEW
 
 router = APIRouter()
 
@@ -70,7 +71,7 @@ def ui_day(
     #    normalised: strip spaces, uppercase state.
     #    Prefer PF provider over others.
     # -----------------------
-    race_results_index: dict[tuple[str, str, int, int], models.RaceResult] = {}
+    race_results_index: dict[tuple[str, str, int, int], Any] = {}
 
     rr_rows = (
         db.query(models.RaceResult, models.Race, models.Meeting)
@@ -91,13 +92,59 @@ def ui_day(
             race_results_index[key] = rr
         else:
             # Prefer PF over RA/other providers
-            if existing.provider != "PF" and rr.provider == "PF":
+            if getattr(existing, "provider", None) != "PF" and rr.provider == "PF":
                 race_results_index[key] = rr
 
-    print(f"[UI] race_results_index size = {len(race_results_index)}")
+    print(f"[UI] race_results_index size (PF/DB) = {len(race_results_index)}")
     for k, v in list(race_results_index.items())[:10]:
         print(
             f"[UI] RR index sample {k} -> "
+            f"pos={v.finish_position}, sp={v.starting_price}, provider={v.provider}"
+        )
+
+    # -----------------------
+    # 2b) Supplement index with RA Crawler /results for this date
+    #     (fallback for RA-only days; does NOT override PF rows)
+    # -----------------------
+    ra_rows = []
+    try:
+        ra_client = RAResultsClient()
+        try:
+            ra_rows = ra_client.fetch_results_for_date(meeting_date)
+            print(f"[UI] RAResultsClient rows for {meeting_date}: {len(ra_rows)}")
+        finally:
+            ra_client.close()
+    except Exception as e:
+        print(f"[UI] error fetching RA results for {meeting_date}: {e}")
+        ra_rows = []
+
+    class _RAStub:
+        __slots__ = ("finish_position", "starting_price", "provider")
+
+        def __init__(self, finish_position, starting_price, provider: str):
+            self.finish_position = finish_position
+            self.starting_price = starting_price
+            self.provider = provider
+
+    for ra in ra_rows:
+        track = (ra.track or "").strip()
+        state = (ra.state or "").strip().upper()
+        key = (track, state, ra.race_no, ra.tab_number)
+
+        # Never override an existing result (especially PF)
+        if key in race_results_index:
+            continue
+
+        race_results_index[key] = _RAStub(
+            finish_position=ra.finishing_pos,
+            starting_price=ra.starting_price,
+            provider="RA",
+        )
+
+    print(f"[UI] race_results_index size after RA fallback = {len(race_results_index)}")
+    for k, v in list(race_results_index.items())[:10]:
+        print(
+            f"[UI] RR+RA index sample {k} -> "
             f"pos={v.finish_position}, sp={v.starting_price}, provider={v.provider}"
         )
 
