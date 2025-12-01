@@ -243,6 +243,7 @@ def _fetch_pf_track_conditions(target_date: date) -> Dict[str, str]:
     )
     return lookup
 
+
 def _meeting_has_big_maiden(
     race_list: List[Dict[str, Any]],
     threshold: int = 29000,
@@ -253,6 +254,11 @@ def _meeting_has_big_maiden(
 
     We treat the meeting as Country in the selection logic and only
     include it automatically if this returns True.
+
+    Maiden detection now looks at both the class text AND the race
+    description/name, so things like
+      class="BM58", description="COOLMORE COUNTRY BOOSTED MAIDEN PLATE"
+    are still recognised as Maiden races.
     """
     for r in race_list:
         # Class / raceClass field – try a few common keys.
@@ -261,15 +267,21 @@ def _meeting_has_big_maiden(
             or r.get("class_text")
             or r.get("raceClass")
             or r.get("race_class")
+            or ""
         )
 
-        if not isinstance(class_text, str):
-            continue
+        # Also consider description / race name when looking for "Maiden"
+        desc_text = (
+            r.get("description")
+            or r.get("race_name")
+            or r.get("name")
+            or ""
+        )
 
-        lc = class_text.lower()
+        combined = f"{class_text} {desc_text}".lower()
 
         # Maiden detection – be tolerant of "Maiden", "MDN", etc.
-        is_maiden = ("maiden" in lc) or ("mdn" in lc)
+        is_maiden = ("maiden" in combined) or ("mdn" in combined)
         if not is_maiden:
             continue
 
@@ -278,6 +290,7 @@ def _meeting_has_big_maiden(
             r.get("prize")
             or r.get("prizemoney")
             or r.get("prize_total")
+            or r.get("total_prize")
         )
 
         if raw_prize is None:
@@ -295,6 +308,7 @@ def _meeting_has_big_maiden(
             return True
 
     return False
+
 
 # ----------------------------
 # BUILD PAYLOADS

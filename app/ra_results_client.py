@@ -22,7 +22,6 @@ class RAResultRow:
     margin_lens: Optional[float]
     starting_price: Optional[float]
 
-
 class RAResultsClient:
     """
     Thin client over the RA Crawler /results endpoint.
