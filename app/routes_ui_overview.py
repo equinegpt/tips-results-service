@@ -143,10 +143,19 @@ def ui_overview(
                 "places": 0,
                 "stakes": Decimal("0.0"),
                 "return": Decimal("0.0"),
+                # per-track date range within the window
+                "min_date": meeting.date,
+                "max_date": meeting.date,
             }
 
         bucket = agg[key]
         bucket["tips"] += 1
+
+        # track min/max date for this track in the window
+        if meeting.date < bucket["min_date"]:
+            bucket["min_date"] = meeting.date
+        if meeting.date > bucket["max_date"]:
+            bucket["max_date"] = meeting.date
 
         # Stake units (Numeric in DB) → Decimal
         stake_units = Decimal(str(tip.stake_units or 1))
@@ -254,6 +263,8 @@ def ui_overview(
                 "stakes": float(stakes),
                 "return": float(ret),
                 "roi": roi,
+                "firstDate": b["min_date"].isoformat(),
+                "lastDate": b["max_date"].isoformat(),
             }
         )
 
@@ -270,7 +281,7 @@ def ui_overview(
     if json:
         return JSONResponse(payload)
 
-    # 5) Render HTML (unchanged formatting)
+    # 5) Render HTML
     html_rows = []
     for t in tracks:
         win_sr_pct = 100.0 * t["winStrikeRate"]
@@ -288,6 +299,7 @@ def ui_overview(
         html_rows.append(
             f"""
             <tr>
+              <td>{t["firstDate"]} → {t["lastDate"]}</td>
               <td>{t["track"]}</td>
               <td>{t["state"]}</td>
               <td style="text-align:right">{t["tips"]}</td>
@@ -366,10 +378,36 @@ def ui_overview(
       .controls {{
         margin-bottom: 12px;
       }}
+      .controls form {{
+        display: inline-block;
+        margin-right: 16px;
+      }}
+      .controls label {{
+        margin-right: 8px;
+        font-size: 13px;
+        color: #ccc;
+      }}
+      .controls input[type="date"] {{
+        background: #11131a;
+        border: 1px solid #333;
+        color: #f5f5f5;
+        border-radius: 4px;
+        padding: 2px 4px;
+      }}
+      .controls button {{
+        background: #18CB96;
+        border: none;
+        color: #0b0c10;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }}
       .controls a {{
         color: #18CB96;
         text-decoration: none;
         margin-right: 12px;
+        font-size: 13px;
       }}
     </style>
   </head>
@@ -381,6 +419,17 @@ def ui_overview(
       <span class="pill">tips: {sum(t["tips"] for t in tracks)}</span>
     </div>
     <div class="controls">
+      <form method="get" action="/ui/overview">
+        <label>
+          From
+          <input type="date" name="date_from" value="{payload["dateFrom"]}">
+        </label>
+        <label>
+          To
+          <input type="date" name="date_to" value="{payload["dateTo"]}">
+        </label>
+        <button type="submit">Apply</button>
+      </form>
       <a href="/ui/overview?date_from={payload["dateFrom"]}&date_to={payload["dateTo"]}&json=1">
         View as JSON
       </a>
@@ -388,6 +437,7 @@ def ui_overview(
     <table>
       <thead>
         <tr>
+          <th>Dates</th>
           <th>Track</th>
           <th>State</th>
           <th style="text-align:right">Tips</th>
@@ -401,7 +451,7 @@ def ui_overview(
         </tr>
       </thead>
       <tbody>
-        {''.join(html_rows) if html_rows else '<tr><td colspan="10">No tips in this window.</td></tr>'}
+        {''.join(html_rows) if html_rows else '<tr><td colspan="11">No tips in this window.</td></tr>'}
       </tbody>
     </table>
   </body>
