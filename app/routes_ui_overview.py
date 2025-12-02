@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 from .database import get_db
 from .models import Meeting, Race, Tip, TipOutcome
+from .ra_results_client import RAResultsClient
+from .daily_generator import _tracks_match  # reuse the same fuzzy track matcher
 
 router = APIRouter()
 
@@ -24,6 +26,60 @@ def _parse_date_param(value: Optional[str]) -> Optional[date]:
     if not value:
         return None
     return date.fromisoformat(value)
+
+
+def _classify_outcome_from_pos(pos_fin: Optional[int]) -> str:
+    """
+    Map finishing position from RA results to a TipOutcome-style status.
+    """
+    if pos_fin is None or pos_fin <= 0:
+        return "PENDING"
+    if pos_fin == 1:
+        return "WIN"
+    if pos_fin in (2, 3):
+        return "PLACE"
+    return "LOSE"
+
+
+def _build_ra_results_index(
+    d_from: date,
+    d_to: date,
+) -> Dict[Tuple[date, str, int, int], List[Any]]:
+    """
+    Build an index over RA Crawler results for the date window [d_from, d_to].
+
+    Key:   (meeting_date, STATE, race_no, tab_number)
+    Value: list[RAResultRow]  (we use _tracks_match on track name when needed)
+    """
+    index: Dict[Tuple[date, str, int, int], List[Any]] = {}
+
+    client = RAResultsClient()
+    try:
+        day = d_from
+        while day <= d_to:
+            try:
+                rows = client.fetch_results_for_date(day)
+                print(f"[OVR] RA rows for {day}: {len(rows)}")
+            except Exception as e:
+                print(f"[OVR] error fetching RA rows for {day}: {e}")
+                rows = []
+
+            for r in rows:
+                key = (
+                    r.meeting_date,
+                    (r.state or "").upper(),
+                    r.race_no,
+                    r.tab_number,
+                )
+                index.setdefault(key, []).append(r)
+
+            day += timedelta(days=1)
+    finally:
+        client.close()
+
+    total = sum(len(v) for v in index.values())
+    print(f"[OVR] RA index total rows = {total}")
+    return index
 
 
 @router.get("/ui/overview", response_class=HTMLResponse)
@@ -45,15 +101,21 @@ def ui_overview(
     """
     Overview of tips & results across tracks for a date window.
 
-    - Default: renders an HTML table (for browser use).
-    - If `?json=1` is passed, returns the raw JSON payload instead.
+    Source-of-truth for results:
+      • FIRST: RA Crawler results (via RAResultsClient)
+      • FALLBACK: TipOutcome rows (legacy PF import)
+
+    That way this matches /ui/day, which is now also driven off RA.
     """
     today = _today_melb()
 
     d_to = _parse_date_param(date_to) or today
     d_from = _parse_date_param(date_from) or (d_to - timedelta(days=6))
 
-    # Fetch all tips + outcomes in that window
+    # 1) Build RA results index for the window
+    ra_index = _build_ra_results_index(d_from, d_to)
+
+    # 2) Fetch all tips + (optional) outcomes in that window
     rows = (
         db.query(Tip, TipOutcome, Race, Meeting)
         .join(Race, Tip.race_id == Race.id)
@@ -62,16 +124,20 @@ def ui_overview(
         .filter(Meeting.date >= d_from, Meeting.date <= d_to)
         .all()
     )
+    print(f"[OVR] raw rows (Tip+Outcome+Race+Meeting) in window {d_from} → {d_to}: {len(rows)}")
 
-    # Aggregate per (track, state)
+    # 3) Aggregate per (track, state)
     agg: Dict[tuple[str, str], Dict[str, Any]] = {}
 
     for tip, outcome, race, meeting in rows:
-        key = (meeting.track_name, meeting.state)
+        key_track = meeting.track_name
+        key_state = meeting.state
+
+        key = (key_track, key_state)
         if key not in agg:
             agg[key] = {
-                "track": meeting.track_name,
-                "state": meeting.state,
+                "track": key_track,
+                "state": key_state,
                 "tips": 0,
                 "wins": 0,
                 "places": 0,
@@ -86,8 +152,62 @@ def ui_overview(
         stake_units = Decimal(str(tip.stake_units or 1))
         bucket["stakes"] += stake_units
 
-        status = outcome.outcome_status if outcome is not None else "PENDING"
+        # -----------------------------
+        # RA-FIRST status + SP
+        # -----------------------------
+        status: Optional[str] = None
+        sp_src: Any = None
 
+        # Base key ignoring track name (we'll use _tracks_match for it)
+        ra_key = (
+            meeting.date,
+            (meeting.state or "").upper(),
+            race.race_number,
+            tip.tab_number,
+        )
+        candidates = ra_index.get(ra_key) or []
+        ra_row = None
+
+        if candidates:
+            mt_track = meeting.track_name or ""
+            if len(candidates) == 1:
+                ra_row = candidates[0]
+            else:
+                # Use same fuzzy track matcher as daily generator
+                for cand in candidates:
+                    if _tracks_match(mt_track, cand.track):
+                        ra_row = cand
+                        break
+                if ra_row is None:
+                    ra_row = candidates[0]
+
+        if ra_row is not None:
+            # RA is canonical: scratched runners are "SCRATCHED",
+            # otherwise classify by finishing_pos.
+            if getattr(ra_row, "is_scratched", False):
+                status = "SCRATCHED"
+            else:
+                status = _classify_outcome_from_pos(ra_row.finishing_pos)
+            sp_src = ra_row.starting_price
+
+            print(
+                f"[OVR] RA primary {meeting.track_name} {meeting.state} "
+                f"{meeting.date} R{race.race_number} #{tip.tab_number}: "
+                f"pos={ra_row.finishing_pos}, sp={ra_row.starting_price}, "
+                f"status={status}"
+            )
+        else:
+            # No RA row → fall back to TipOutcome (legacy PF results)
+            if outcome is not None:
+                status = outcome.outcome_status or "PENDING"
+                sp_src = outcome.starting_price
+            else:
+                status = "PENDING"
+                sp_src = None
+
+        # -----------------------------
+        # Status → wins / places / return
+        # -----------------------------
         if status == "WIN":
             bucket["wins"] += 1
             bucket["places"] += 1
@@ -101,16 +221,15 @@ def ui_overview(
             pass
 
         # Simple return calc: for winners, SP * stake; others 0
-        sp = outcome.starting_price if outcome is not None else None
-        if isinstance(sp, (Decimal, float, int)):
-            sp_dec = Decimal(str(sp))
+        if isinstance(sp_src, (Decimal, float, int)):
+            sp_dec = Decimal(str(sp_src))
         else:
             sp_dec = None
 
         if status == "WIN" and sp_dec is not None:
             bucket["return"] += stake_units * sp_dec
 
-    # Convert aggregates to list + compute strike rates & ROI
+    # 4) Convert aggregates to list + compute strike rates & ROI
     tracks: list[Dict[str, Any]] = []
     for (track_name, state), b in agg.items():
         tips = b["tips"]
@@ -151,7 +270,7 @@ def ui_overview(
     if json:
         return JSONResponse(payload)
 
-    # Otherwise render simple HTML
+    # 5) Render HTML (unchanged formatting)
     html_rows = []
     for t in tracks:
         win_sr_pct = 100.0 * t["winStrikeRate"]
