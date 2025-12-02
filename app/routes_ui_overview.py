@@ -105,7 +105,8 @@ def ui_overview(
       • FIRST: RA Crawler results (via RAResultsClient)
       • FALLBACK: TipOutcome rows (legacy PF import)
 
-    That way this matches /ui/day, which is now also driven off RA.
+    Aggregation is per (meeting date, track, state) so each line
+    is a single meeting/day, not merged across the window.
     """
     today = _today_melb()
 
@@ -126,16 +127,18 @@ def ui_overview(
     )
     print(f"[OVR] raw rows (Tip+Outcome+Race+Meeting) in window {d_from} → {d_to}: {len(rows)}")
 
-    # 3) Aggregate per (track, state)
-    agg: Dict[tuple[str, str], Dict[str, Any]] = {}
+    # 3) Aggregate per (date, track, state)
+    agg: Dict[tuple[date, str, str], Dict[str, Any]] = {}
 
     for tip, outcome, race, meeting in rows:
+        key_date = meeting.date
         key_track = meeting.track_name
         key_state = meeting.state
 
-        key = (key_track, key_state)
+        key = (key_date, key_track, key_state)
         if key not in agg:
             agg[key] = {
+                "date": key_date,
                 "track": key_track,
                 "state": key_state,
                 "tips": 0,
@@ -143,19 +146,10 @@ def ui_overview(
                 "places": 0,
                 "stakes": Decimal("0.0"),
                 "return": Decimal("0.0"),
-                # per-track date range within the window
-                "min_date": meeting.date,
-                "max_date": meeting.date,
             }
 
         bucket = agg[key]
         bucket["tips"] += 1
-
-        # track min/max date for this track in the window
-        if meeting.date < bucket["min_date"]:
-            bucket["min_date"] = meeting.date
-        if meeting.date > bucket["max_date"]:
-            bucket["max_date"] = meeting.date
 
         # Stake units (Numeric in DB) → Decimal
         stake_units = Decimal(str(tip.stake_units or 1))
@@ -240,7 +234,7 @@ def ui_overview(
 
     # 4) Convert aggregates to list + compute strike rates & ROI
     tracks: list[Dict[str, Any]] = []
-    for (track_name, state), b in agg.items():
+    for (row_date, track_name, state), b in agg.items():
         tips = b["tips"]
         wins = b["wins"]
         places = b["places"]
@@ -253,6 +247,7 @@ def ui_overview(
 
         tracks.append(
             {
+                "date": row_date.isoformat(),
                 "track": track_name,
                 "state": state,
                 "tips": tips,
@@ -263,13 +258,11 @@ def ui_overview(
                 "stakes": float(stakes),
                 "return": float(ret),
                 "roi": roi,
-                "firstDate": b["min_date"].isoformat(),
-                "lastDate": b["max_date"].isoformat(),
             }
         )
 
-    # Sort: best ROI first, then by tips desc
-    tracks.sort(key=lambda t: (t["roi"], t["tips"]), reverse=True)
+    # Sort: latest date first, then best ROI, then tips desc
+    tracks.sort(key=lambda t: (t["date"], t["roi"], t["tips"]), reverse=True)
 
     payload = {
         "dateFrom": d_from.isoformat(),
@@ -299,7 +292,7 @@ def ui_overview(
         html_rows.append(
             f"""
             <tr>
-              <td>{t["firstDate"]} → {t["lastDate"]}</td>
+              <td>{t["date"]}</td>
               <td>{t["track"]}</td>
               <td>{t["state"]}</td>
               <td style="text-align:right">{t["tips"]}</td>
@@ -415,7 +408,7 @@ def ui_overview(
     <h1>Tips Overview</h1>
     <div class="meta">
       Window: <strong>{payload["dateFrom"]}</strong> → <strong>{payload["dateTo"]}</strong>
-      <span class="pill">tracks: {len(tracks)}</span>
+      <span class="pill">rows: {len(tracks)}</span>
       <span class="pill">tips: {sum(t["tips"] for t in tracks)}</span>
     </div>
     <div class="controls">
@@ -437,7 +430,7 @@ def ui_overview(
     <table>
       <thead>
         <tr>
-          <th>Dates</th>
+          <th>Date</th>
           <th>Track</th>
           <th>State</th>
           <th style="text-align:right">Tips</th>
