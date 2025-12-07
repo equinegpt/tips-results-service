@@ -252,16 +252,20 @@ def _meeting_has_big_maiden(
     Return True if ANY race in this meeting is a Maiden-class event
     with prize money strictly above `threshold` (e.g. > 29,000).
 
-    We treat the meeting as Country in the selection logic and only
-    include it automatically if this returns True.
+    Maiden detection rules (RA schema):
+      • PRIMARY: class field contains "Maiden"/"MDN"
+          e.g. class="Maiden"
+      • BACKUP: description/name contains "Maiden"/"MDN"
+          e.g. class="BM65", description="F&M Maiden Plate"
 
-    Maiden detection now looks at both the class text AND the race
-    description/name, so things like
-      class="BM58", description="COOLMORE COUNTRY BOOSTED MAIDEN PLATE"
-    are still recognised as Maiden races.
+    A race qualifies as a "big maiden" if:
+      (class_is_maiden OR desc_is_maiden) AND prize > threshold
     """
+
     for r in race_list:
-        # Class / raceClass field – try a few common keys.
+        # -----------------------------
+        # 1) Class + Description text
+        # -----------------------------
         class_text = (
             r.get("class")
             or r.get("class_text")
@@ -270,7 +274,6 @@ def _meeting_has_big_maiden(
             or ""
         )
 
-        # Also consider description / race name when looking for "Maiden"
         desc_text = (
             r.get("description")
             or r.get("race_name")
@@ -278,16 +281,24 @@ def _meeting_has_big_maiden(
             or ""
         )
 
-        combined = f"{class_text} {desc_text}".lower()
+        lc_class = str(class_text).lower()
+        lc_desc  = str(desc_text).lower()
 
-        # Maiden detection – be tolerant of "Maiden", "MDN", etc.
-        is_maiden = ("maiden" in combined) or ("mdn" in combined)
+        # PRIMARY: class is Maiden
+        class_is_maiden = ("maiden" in lc_class) or ("mdn" in lc_class)
+
+        # BACKUP: description contains Maiden (even if class is BM65 etc.)
+        desc_is_maiden = ("maiden" in lc_desc) or ("mdn" in lc_desc)
+
+        is_maiden = class_is_maiden or desc_is_maiden
         if not is_maiden:
             continue
 
-        # Prize money – RA usually has an integer 'prize' field.
+        # -----------------------------
+        # 2) Prize / prizemoney
+        # -----------------------------
         raw_prize = (
-            r.get("prize")
+            r.get("prize")           # your RA example: "prize": 42500
             or r.get("prizemoney")
             or r.get("prize_total")
             or r.get("total_prize")
@@ -296,19 +307,29 @@ def _meeting_has_big_maiden(
         if raw_prize is None:
             continue
 
+        # Be tolerant of "42500", "42,500", "42500.0"
+        prize_val: int
         try:
             prize_val = int(raw_prize)
         except (TypeError, ValueError):
-            try:
-                prize_val = int(float(raw_prize))
-            except Exception:
-                continue
+            if isinstance(raw_prize, str):
+                digits = "".join(ch for ch in raw_prize if ch.isdigit())
+                if not digits:
+                    continue
+                prize_val = int(digits)
+            else:
+                try:
+                    prize_val = int(float(raw_prize))
+                except Exception:
+                    continue
 
         if prize_val > threshold:
+            # Optional debug – helps confirm Werribee is being picked up:
+            # print(f"[BIG-MDN] {r.get('track')} R{r.get('race_no')} "
+            #       f"{desc_text!r} class={class_text!r} prize={prize_val}")
             return True
 
     return False
-
 
 # ----------------------------
 # BUILD PAYLOADS
@@ -431,15 +452,10 @@ def build_generate_tips_payloads_for_date(
                     continue
             # Metro & Provincial always included if we reach here
 
-        # --- pf_meeting_id from RA /races (meetingId etc) ---
+        # --- pf_meeting_id from RA /races (must be explicitly mapped) ---
         pf_meeting_id: int | None = None
         for rec in race_list:
-            raw_mid = (
-                rec.get("pf_meeting_id")
-                or rec.get("pfMeetingId")
-                or rec.get("meetingId")
-                or rec.get("meeting_id")
-            )
+            raw_mid = rec.get("pf_meeting_id") or rec.get("pfMeetingId")
             if raw_mid is None:
                 continue
             try:
@@ -478,7 +494,11 @@ def build_generate_tips_payloads_for_date(
             "state": state,
             "country": "AUS",
             "pf_meeting_id": pf_meeting_id,
-            "ra_meetcode": race_list[0].get("ra_meetcode"),
+            "ra_meetcode": (
+                race_list[0].get("ra_meetcode")
+                or race_list[0].get("meetingId")
+                or race_list[0].get("meeting_id")
+            ),
         }
 
         # Build races array (race + scratchings + track_condition)
