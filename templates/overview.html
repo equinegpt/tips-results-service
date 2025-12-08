@@ -116,6 +116,7 @@
       {% set os_pnl = os.get('pnl', 0.0) %}
       {% set os_quin = os.get('quinellas', 0) %}
       {% set os_tri = os.get('trifectas', 0) %}
+      {% set os_ai_best = os.get('ai_best_wins', 0) %}
 
       <section class="meeting-card meeting-card--summary">
         <div class="meeting-header">
@@ -146,6 +147,10 @@
             <div class="summary-item">
               <div class="summary-label">WINNERS</div>
               <div class="summary-value">{{ os.get('wins', 0) }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">AI BEST WINS</div>
+              <div class="summary-value">{{ os_ai_best }}</div>
             </div>
             <div class="summary-item">
               <div class="summary-label">STRIKE RATE</div>
@@ -205,6 +210,7 @@
                 <th>Track</th>
                 <th>State</th>
                 <th>TIPS</th>
+                <th>AI BEST</th>
                 <th>WIN</th>
                 <th>SR%</th>
                 <th>QUIN</th>
@@ -223,6 +229,7 @@
                   {% set ts_pnl = ts.get('pnl', 0.0) %}
                   {% set ts_quin = ts.get('quinellas', 0) %}
                   {% set ts_tri = ts.get('trifectas', 0) %}
+                  {% set ts_ai_best = ts.get('ai_best_wins', 0) %}
                   {% set ts_roi = (ts_pnl / ts_turnover * 100) if ts_turnover > 0 else 0 %}
 
                   {% set row_class = "" %}
@@ -240,6 +247,7 @@
                       {{ t.state if t.state is defined else "?" }}
                     </td>
                     <td>{{ ts.get('tips', 0) }}</td>
+                    <td>{{ ts_ai_best }}</td>
                     <td>{{ ts.get('wins', 0) }}</td>
                     <td>{{ "%.1f"|format(ts_strike) }}</td>
                     <td>{{ ts_quin }}</td>
@@ -287,6 +295,7 @@
               <tr>
                 <th>Date</th>
                 <th>TIPS</th>
+                <th>AI BEST</th>
                 <th>WIN</th>
                 <th>SR%</th>
                 <th>QUIN</th>
@@ -304,6 +313,7 @@
                   {% set ds_pnl = ds.get('pnl', 0.0) %}
                   {% set ds_quin = ds.get('quinellas', 0) %}
                   {% set ds_tri = ds.get('trifectas', 0) %}
+                  {% set ds_ai_best = ds.get('ai_best_wins', 0) %}
 
                   <tr>
                     <td>
@@ -314,6 +324,7 @@
                       {% endif %}
                     </td>
                     <td>{{ ds.get('tips', 0) }}</td>
+                    <td>{{ ds_ai_best }}</td>
                     <td>{{ ds.get('wins', 0) }}</td>
                     <td>{{ "%.1f"|format(ds_strike) }}</td>
                     <td>{{ ds_quin }}</td>
