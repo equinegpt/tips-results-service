@@ -1,3 +1,87 @@
+# app/routes_ui_overview.py
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from typing import Optional, Dict, Any, List, Tuple
+
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy.orm import Session
+from zoneinfo import ZoneInfo
+
+from .database import get_db
+from .models import Meeting, Race, Tip, TipOutcome
+from .ra_results_client import RAResultsClient
+from .daily_generator import _tracks_match  # reuse the same fuzzy track matcher
+
+router = APIRouter()
+
+
+def _today_melb() -> date:
+    return datetime.now(ZoneInfo("Australia/Melbourne")).date()
+
+
+def _parse_date_param(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
+def _classify_outcome_from_pos(pos_fin: Optional[int]) -> str:
+    """
+    Map finishing position from RA results to a TipOutcome-style status.
+    """
+    if pos_fin is None or pos_fin <= 0:
+        return "PENDING"
+    if pos_fin == 1:
+        return "WIN"
+    if pos_fin in (2, 3):
+        return "PLACE"
+    return "LOSE"
+
+
+def _build_ra_results_index(
+    d_from: date,
+    d_to: date,
+) -> Dict[Tuple[date, str, int, int], List[Any]]:
+    """
+    Build an index over RA Crawler results for the date window [d_from, d_to].
+
+    Key:   (meeting_date, STATE, race_no, tab_number)
+    Value: list[RAResultRow]  (we use _tracks_match on track name when needed)
+    """
+    index: Dict[Tuple[date, str, int, int], List[Any]] = {}
+
+    client = RAResultsClient()
+    try:
+        day = d_from
+        while day <= d_to:
+            try:
+                rows = client.fetch_results_for_date(day)
+                print(f"[OVR] RA rows for {day}: {len(rows)}")
+            except Exception as e:
+                print(f"[OVR] error fetching RA rows for {day}: {e}")
+                rows = []
+
+            for r in rows:
+                key = (
+                    r.meeting_date,
+                    (r.state or "").upper(),
+                    r.race_no,
+                    r.tab_number,
+                )
+                index.setdefault(key, []).append(r)
+
+            day += timedelta(days=1)
+    finally:
+        client.close()
+
+    total = sum(len(v) for v in index.values())
+    print(f"[OVR] RA index total rows = {total}")
+    return index
+
+
 @router.get("/ui/overview", response_class=HTMLResponse)
 def ui_overview(
     date_from: Optional[str] = Query(
