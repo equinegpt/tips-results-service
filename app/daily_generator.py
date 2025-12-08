@@ -377,6 +377,13 @@ def build_generate_tips_payloads_for_date(
     scratchings_lookup = _fetch_pf_scratchings_lookup(target_date)
     conditions_lookup = _fetch_pf_track_conditions(target_date)
 
+    # Optional debug: lets you see what the caller passed in
+    print(
+        f"[DG] build_generate_tips_payloads_for_date: "
+        f"target_date={target_date}, force_all_meetings={force_all_meetings}, "
+        f"track_types={track_types}"
+    )
+
     # Normalise track_types into an allowlist of meeting types.
     # Only applied when force_all_meetings == False.
     if track_types is not None:
@@ -417,7 +424,7 @@ def build_generate_tips_payloads_for_date(
             pass
 
         # ---------------------------
-        # Meeting type: M / P / C
+        # Meeting type: normalise to M / P / C
         # ---------------------------
         raw_type = (
             race_list[0].get("type")
@@ -425,7 +432,17 @@ def build_generate_tips_payloads_for_date(
             or race_list[0].get("location")  # fallback if PF-style data present
             or ""
         )
-        meeting_type = str(raw_type).strip().upper() or "C"
+        raw_type_str = str(raw_type).strip().upper()
+
+        if raw_type_str in {"M", "METRO", "METROPOLITAN"}:
+            meeting_type = "M"
+        elif raw_type_str in {"P", "PROV", "PROVINCIAL"}:
+            meeting_type = "P"
+        elif raw_type_str in {"C", "CTRY", "COUNTRY"}:
+            meeting_type = "C"
+        else:
+            # Treat unknown/empty as Country by default
+            meeting_type = "C"
 
         is_metro = meeting_type == "M"
         is_prov = meeting_type == "P"
@@ -454,6 +471,8 @@ def build_generate_tips_payloads_for_date(
 
         # --- pf_meeting_id from RA /races (must be explicitly mapped) ---
         pf_meeting_id: int | None = None
+
+        # First, try legacy PF-style fields (if present)
         for rec in race_list:
             raw_mid = rec.get("pf_meeting_id") or rec.get("pfMeetingId")
             if raw_mid is None:
@@ -461,8 +480,24 @@ def build_generate_tips_payloads_for_date(
             try:
                 pf_meeting_id = int(raw_mid)
                 break
-            except Exception:
+            except (TypeError, ValueError):
                 continue
+
+        # If still None, fall back to RA meetingId / meeting_id
+        if pf_meeting_id is None:
+            ra_mid = race_list[0].get("meetingId") or race_list[0].get("meeting_id")
+            if ra_mid is not None:
+                try:
+                    pf_meeting_id = int(ra_mid)
+                    print(
+                        f"[PFID] using RA meetingId={pf_meeting_id} as pf_meeting_id for "
+                        f"{track_name} {state} on {meeting_date}"
+                    )
+                except (TypeError, ValueError):
+                    print(
+                        f"[PFID] unable to coerce RA meetingId={ra_mid!r} "
+                        f"to int for {track_name} {state} on {meeting_date}"
+                    )
 
         if pf_meeting_id is None:
             print(
