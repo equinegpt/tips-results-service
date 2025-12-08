@@ -1,87 +1,3 @@
-# app/routes_ui_overview.py
-from __future__ import annotations
-
-from datetime import date, datetime, timedelta
-from decimal import Decimal
-from typing import Optional, Dict, Any, List, Tuple
-
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse, JSONResponse
-from sqlalchemy.orm import Session
-from zoneinfo import ZoneInfo
-
-from .database import get_db
-from .models import Meeting, Race, Tip, TipOutcome
-from .ra_results_client import RAResultsClient
-from .daily_generator import _tracks_match  # reuse the same fuzzy track matcher
-
-router = APIRouter()
-
-
-def _today_melb() -> date:
-    return datetime.now(ZoneInfo("Australia/Melbourne")).date()
-
-
-def _parse_date_param(value: Optional[str]) -> Optional[date]:
-    if not value:
-        return None
-    return date.fromisoformat(value)
-
-
-def _classify_outcome_from_pos(pos_fin: Optional[int]) -> str:
-    """
-    Map finishing position from RA results to a TipOutcome-style status.
-    """
-    if pos_fin is None or pos_fin <= 0:
-        return "PENDING"
-    if pos_fin == 1:
-        return "WIN"
-    if pos_fin in (2, 3):
-        return "PLACE"
-    return "LOSE"
-
-
-def _build_ra_results_index(
-    d_from: date,
-    d_to: date,
-) -> Dict[Tuple[date, str, int, int], List[Any]]:
-    """
-    Build an index over RA Crawler results for the date window [d_from, d_to].
-
-    Key:   (meeting_date, STATE, race_no, tab_number)
-    Value: list[RAResultRow]  (we use _tracks_match on track name when needed)
-    """
-    index: Dict[Tuple[date, str, int, int], List[Any]] = {}
-
-    client = RAResultsClient()
-    try:
-        day = d_from
-        while day <= d_to:
-            try:
-                rows = client.fetch_results_for_date(day)
-                print(f"[OVR] RA rows for {day}: {len(rows)}")
-            except Exception as e:
-                print(f"[OVR] error fetching RA rows for {day}: {e}")
-                rows = []
-
-            for r in rows:
-                key = (
-                    r.meeting_date,
-                    (r.state or "").upper(),
-                    r.race_no,
-                    r.tab_number,
-                )
-                index.setdefault(key, []).append(r)
-
-            day += timedelta(days=1)
-    finally:
-        client.close()
-
-    total = sum(len(v) for v in index.values())
-    print(f"[OVR] RA index total rows = {total}")
-    return index
-
-
 @router.get("/ui/overview", response_class=HTMLResponse)
 def ui_overview(
     date_from: Optional[str] = Query(
@@ -125,7 +41,10 @@ def ui_overview(
         .filter(Meeting.date >= d_from, Meeting.date <= d_to)
         .all()
     )
-    print(f"[OVR] raw rows (Tip+Outcome+Race+Meeting) in window {d_from} → {d_to}: {len(rows)}")
+    print(
+        f"[OVR] raw rows (Tip+Outcome+Race+Meeting) in window "
+        f"{d_from} → {d_to}: {len(rows)}"
+    )
 
     # 3) Aggregate per (date, track, state)
     agg: Dict[tuple[date, str, str], Dict[str, Any]] = {}
@@ -146,6 +65,9 @@ def ui_overview(
                 "places": 0,
                 "stakes": Decimal("0.0"),
                 "return": Decimal("0.0"),
+                # NEW: tracking AI-best wins and per-race positions
+                "ai_best_wins": 0,
+                "race_positions": {},  # race.id -> set of finishing positions
             }
 
         bucket = agg[key]
@@ -156,10 +78,43 @@ def ui_overview(
         bucket["stakes"] += stake_units
 
         # -----------------------------
-        # RA-FIRST status + SP
+        # Detect whether this Tip is "AI Best"
+        # -----------------------------
+        ai_is_best = False
+
+        # Common pattern: numeric slot/rank == 1
+        slot = getattr(tip, "slot", None)
+        if isinstance(slot, int) and slot == 1:
+            ai_is_best = True
+        elif isinstance(slot, str) and slot.strip().lower() in {
+            "best",
+            "ai_best",
+            "ai best",
+            "ai-best",
+        }:
+            ai_is_best = True
+
+        # Fallback: use a string type/kind/label field if present
+        label = (
+            getattr(tip, "tip_type", None)
+            or getattr(tip, "kind", None)
+            or getattr(tip, "role", None)
+            or getattr(tip, "tip_label", None)
+        )
+        if isinstance(label, str) and label.strip().lower() in {
+            "best",
+            "ai_best",
+            "ai best",
+            "ai-best",
+        }:
+            ai_is_best = True
+
+        # -----------------------------
+        # RA-FIRST status + SP + finishing pos
         # -----------------------------
         status: Optional[str] = None
         sp_src: Any = None
+        pos: Optional[int] = None  # finishing position if known
 
         # Base key ignoring track name (we'll use _tracks_match for it)
         ra_key = (
@@ -185,28 +140,36 @@ def ui_overview(
                     ra_row = candidates[0]
 
         if ra_row is not None:
+            pos = getattr(ra_row, "finishing_pos", None)
             # RA is canonical: scratched runners are "SCRATCHED",
             # otherwise classify by finishing_pos.
             if getattr(ra_row, "is_scratched", False):
                 status = "SCRATCHED"
             else:
-                status = _classify_outcome_from_pos(ra_row.finishing_pos)
+                status = _classify_outcome_from_pos(pos)
             sp_src = ra_row.starting_price
 
             print(
                 f"[OVR] RA primary {meeting.track_name} {meeting.state} "
                 f"{meeting.date} R{race.race_number} #{tip.tab_number}: "
-                f"pos={ra_row.finishing_pos}, sp={ra_row.starting_price}, "
+                f"pos={pos}, sp={ra_row.starting_price}, "
                 f"status={status}"
             )
         else:
             # No RA row → fall back to TipOutcome (legacy PF results)
             if outcome is not None:
                 status = outcome.outcome_status or "PENDING"
+                # Best-effort grab of a finishing position from outcome
+                pos = (
+                    getattr(outcome, "finishing_pos", None)
+                    or getattr(outcome, "position", None)
+                    or getattr(outcome, "outcome_position", None)
+                )
                 sp_src = outcome.starting_price
             else:
                 status = "PENDING"
                 sp_src = None
+                pos = None
 
         # -----------------------------
         # Status → wins / places / return
@@ -223,6 +186,16 @@ def ui_overview(
             # LOSE or anything else → zero P&L
             pass
 
+        # Count AI Best wins
+        if status == "WIN" and ai_is_best:
+            bucket["ai_best_wins"] += 1
+
+        # Track race-wise finishing positions (for Quinella / Trifecta)
+        if isinstance(pos, int) and pos in (1, 2, 3):
+            race_pos_map = bucket["race_positions"]
+            race_set = race_pos_map.setdefault(race.id, set())
+            race_set.add(int(pos))
+
         # Simple return calc: for winners, SP * stake; others 0
         if isinstance(sp_src, (Decimal, float, int)):
             sp_dec = Decimal(str(sp_src))
@@ -232,7 +205,7 @@ def ui_overview(
         if status == "WIN" and sp_dec is not None:
             bucket["return"] += stake_units * sp_dec
 
-    # 4) Convert aggregates to list + compute strike rates & ROI
+    # 4) Convert aggregates to list + compute strike rates, ROI, Quin, Tri
     tracks: list[Dict[str, Any]] = []
     for (row_date, track_name, state), b in agg.items():
         tips = b["tips"]
@@ -240,10 +213,21 @@ def ui_overview(
         places = b["places"]
         stakes = b["stakes"]
         ret = b["return"]
+        ai_best_wins = b.get("ai_best_wins", 0)
 
         win_sr = float(wins) / tips if tips else 0.0
         place_sr = float(places) / tips if tips else 0.0
         roi = float(ret / stakes) - 1.0 if stakes > 0 else 0.0
+
+        # Compute Quinella / Trifecta counts from race_positions
+        race_positions = b.get("race_positions", {})
+        quin = 0
+        tri = 0
+        for positions in race_positions.values():
+            if 1 in positions and 2 in positions:
+                quin += 1
+            if 1 in positions and 2 in positions and 3 in positions:
+                tri += 1
 
         tracks.append(
             {
@@ -258,6 +242,10 @@ def ui_overview(
                 "stakes": float(stakes),
                 "return": float(ret),
                 "roi": roi,
+                # NEW fields in JSON payload
+                "aiBestWins": ai_best_wins,
+                "quinellas": quin,
+                "trifectas": tri,
             }
         )
 
@@ -297,10 +285,11 @@ def ui_overview(
               <td>{t["state"]}</td>
               <td style="text-align:right">{t["tips"]}</td>
               <td style="text-align:right">{t["wins"]}</td>
-              <td style="text-align:right">{t["places"]}</td>
+              <td style="text-align:right">{t.get("aiBestWins", 0)}</td>
+              <td style="text-align:right">{t.get("quinellas", 0)}</td>
+              <td style="text-align:right">{t.get("trifectas", 0)}</td>
               <td style="text-align:right">{win_sr_pct:.1f}%</td>
               <td style="text-align:right">{place_sr_pct:.1f}%</td>
-              <td style="text-align:right">{t["stakes"]:.1f}</td>
               <td style="text-align:right">{t["return"]:.2f}</td>
               <td class="{roi_class}" style="text-align:right">{roi_pct:.1f}%</td>
             </tr>
@@ -435,16 +424,17 @@ def ui_overview(
           <th>State</th>
           <th style="text-align:right">Tips</th>
           <th style="text-align:right">Wins</th>
-          <th style="text-align:right">Places</th>
+          <th style="text-align:right">AI Best Wins</th>
+          <th style="text-align:right">Quinellas</th>
+          <th style="text-align:right">Trifectas</th>
           <th style="text-align:right">Win SR</th>
           <th style="text-align:right">Place SR</th>
-          <th style="text-align:right">Stakes</th>
           <th style="text-align:right">Return</th>
           <th style="text-align:right">ROI</th>
         </tr>
       </thead>
       <tbody>
-        {''.join(html_rows) if html_rows else '<tr><td colspan="11">No tips in this window.</td></tr>'}
+        {''.join(html_rows) if html_rows else '<tr><td colspan="12">No tips in this window.</td></tr>'}
       </tbody>
     </table>
   </body>
