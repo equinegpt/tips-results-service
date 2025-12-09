@@ -20,6 +20,20 @@ from .ra_results_client import RAResultsClient  # 👈 NEW
 
 router = APIRouter()
 
+def _classify_outcome(pos_fin: Optional[int]) -> str:
+    """
+    Simple WIN/PLACE/LOSE classifier based on finishing position.
+    Mirrors pf_results._classify_outcome.
+    """
+    if pos_fin is None or pos_fin <= 0:
+        return "UNKNOWN"
+    if pos_fin == 1:
+        return "WIN"
+    if pos_fin in (2, 3):
+        return "PLACE"
+    return "LOSE"
+
+
 def _build_day_page_context(
     request: Request,
     meeting_date: date_type,
