@@ -20,40 +20,14 @@ from .ra_results_client import RAResultsClient  # 👈 NEW
 
 router = APIRouter()
 
-
-def _classify_outcome(pos_fin: Optional[int]) -> str:
-    """
-    Simple WIN/PLACE/LOSE classifier based on finishing position.
-    Mirrors pf_results._classify_outcome.
-    """
-    if pos_fin is None or pos_fin <= 0:
-        return "UNKNOWN"
-    if pos_fin == 1:
-        return "WIN"
-    if pos_fin in (2, 3):
-        return "PLACE"
-    return "LOSE"
-
-
-@router.get("/ui/day", response_class=HTMLResponse)
-def ui_day(
+def _build_day_page_context(
     request: Request,
-    meeting_date: date_type = Query(default_factory=today_mel, alias="date"),
-    db: Session = Depends(get_db),
-):
+    meeting_date: date_type,
+    db: Session,
+) -> Dict[str, Any]:
     """
-    HTML view of tips for a given date.
-
-    - Uses TipOutcome when present (PF import).
-    - Falls back to RaceResult by (track_name, state, race_number, tab_number)
-      so RA-only days still populate PLACING / RESULT / SP.
-    - Builds per-meeting and per-day summaries:
-        • tips, wins, strike rate
-        • turnover, return, P&L
-        • quinellas:
-            any two of (AI_BEST, DANGER, VALUE) fill 1st & 2nd (any order)
-        • trifectas:
-            AI_BEST, DANGER & VALUE fill 1st/2nd/3rd in any order
+    Shared builder for /ui/day and /ui/day/mobile.
+    Returns the context dict used by the templates.
     """
     STAKE_PER_UNIT = 10.0  # $10 per stake unit
 
@@ -370,7 +344,7 @@ def ui_day(
                 "meeting": meeting,
                 "tip_run": tr,
                 "races": races_block,
-                "summary": meeting_summary,  # used by template as Meeting summary
+                "summary": meeting_summary,
             }
         )
 
@@ -408,30 +382,36 @@ def ui_day(
         f"trifectas={day_summary['trifectas']}"
     )
 
-    return templates.TemplateResponse(
-        "day.html",
-        {
-            "request": request,
-            "date": meeting_date,
-            "display_date": format_pretty_date(meeting_date),
-            "meetings": meetings_data,
-            "day_summary": day_summary,
-        },
-    )
-@router.get("/ui/day/mobile", response_class=HTMLResponse)
-async def ui_day_mobile(
-    date: dt.date = Query(dt.date.today()),
+    return {
+        "request": request,
+        "date": meeting_date,
+        "display_date": format_pretty_date(meeting_date),
+        "meetings": meetings_data,
+        "day_summary": day_summary,
+    }
+
+
+@router.get("/ui/day", response_class=HTMLResponse)
+def ui_day(
+    request: Request,
+    meeting_date: date_type = Query(default_factory=today_mel, alias="date"),
     db: Session = Depends(get_db),
 ):
-    # reuse the same loader you use for /ui/day
-    meetings, day_summary, display_date = load_day_view(date, db)
-    return templates.TemplateResponse(
-        "day_mobile.html",
-        {
-            "request": request,
-            "date": date,
-            "meetings": meetings,
-            "day_summary": day_summary,
-            "display_date": display_date,
-        },
-    )
+    """
+    Desktop / full-page tips view.
+    """
+    ctx = _build_day_page_context(request, meeting_date, db)
+    return templates.TemplateResponse("day.html", ctx)
+
+
+@router.get("/ui/day/mobile", response_class=HTMLResponse)
+def ui_day_mobile(
+    request: Request,
+    meeting_date: date_type = Query(default_factory=today_mel, alias="date"),
+    db: Session = Depends(get_db),
+):
+    """
+    Mobile-friendly tips view: collapsible meetings, Type / Tab / Horse only.
+    """
+    ctx = _build_day_page_context(request, meeting_date, db)
+    return templates.TemplateResponse("day_mobile.html", ctx)
