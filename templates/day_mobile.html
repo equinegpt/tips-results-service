@@ -76,46 +76,102 @@
             <span class="meeting-chevron" aria-hidden="true">▾</span>
           </button>
 
+          {# --------- Meeting body: Races + Tips --------- #}
           <div class="meeting-body meeting-body--mobile" data-meeting-body hidden>
-            {% for r in m.races %}
-              <article class="race-mobile">
-                <header class="race-mobile-header">
-                  <div class="race-title-line">
-                    <span class="race-label">R{{ r.race_number }}</span>
-                    {% if r.race_name %}
-                      <span class="race-name">{{ r.race_name }}</span>
-                    {% endif %}
-                  </div>
-                  {% if r.distance_m %}
-                    <span class="race-distance">
-                      {{ r.distance_m }}m
-                    </span>
-                  {% endif %}
-                </header>
+            {% set any_tips = false %}
 
-                <div class="race-tips-list">
-                  {% for t in r.tips %}
-                    {% set type_label =
-                      "AI BEST" if t.tip_type == "AI_BEST" else
-                      "DANGER"  if t.tip_type == "DANGER"  else
-                      "VALUE"   if t.tip_type == "VALUE"   else
-                      t.tip_type
-                    %}
-                    <div class="tip-row">
-                      <span class="tip-type tip-type--{{ t.tip_type|lower|replace('_', '-') }}">
-                        {{ type_label }}
-                      </span>
-                      <span class="tip-tab">
-                        #{{ t.tab_number }}
-                      </span>
-                      <span class="tip-horse">
-                        {{ t.horse }}
-                      </span>
+            {# We always iterate races so we keep the nice race headers #}
+            {% if m.races is defined and m.races %}
+              {% for r in m.races %}
+                {# Figure out tips for this race from whatever structure we have #}
+                {% set race_tips = [] %}
+
+                {# 1) Preferred: r.tips attached directly to the race #}
+                {% if r.tips is defined and r.tips %}
+                  {% set race_tips = r.tips %}
+
+                {# 2) If we have m.tip_runs, filter by race_number #}
+                {% elif m.tip_runs is defined and m.tip_runs %}
+                  {% set race_tips =
+                    m.tip_runs
+                    |selectattr('race_number', 'equalto', r.race_number)
+                    |list
+                  %}
+
+                {# 3) Or m.tips, same idea #}
+                {% elif m.tips is defined and m.tips %}
+                  {% set race_tips =
+                    m.tips
+                    |selectattr('race_number', 'equalto', r.race_number)
+                    |list
+                  %}
+                {% endif %}
+
+                {# Only render the race block if there are tips for it #}
+                {% if race_tips and race_tips|length > 0 %}
+                  {% set any_tips = true %}
+
+                  <article class="race-mobile">
+                    <header class="race-mobile-header">
+                      <div class="race-title-line">
+                        <span class="race-label">R{{ r.race_number }}</span>
+                        {% if r.race_name %}
+                          <span class="race-name">{{ r.race_name }}</span>
+                        {% endif %}
+                      </div>
+                      {% if r.distance_m %}
+                        <span class="race-distance">
+                          {{ r.distance_m }}m
+                        </span>
+                      {% endif %}
+                    </header>
+
+                    <div class="race-tips-list">
+                      {% for t in race_tips %}
+                        {% set type_label =
+                          "AI BEST" if t.tip_type == "AI_BEST" else
+                          "DANGER"  if t.tip_type == "DANGER"  else
+                          "VALUE"   if t.tip_type == "VALUE"   else
+                          t.tip_type
+                        %}
+
+                        {# Defensive field resolution for TAB # and horse name #}
+                        {% set tab_no =
+                          (t.tab_number if t.tab_number is defined else
+                           t.tab_no     if t.tab_no     is defined else
+                           t.tab        if t.tab        is defined else
+                           "?")
+                        %}
+                        {% set horse_name =
+                          (t.horse       if t.horse       is defined else
+                           t.horse_name  if t.horse_name  is defined else
+                           t.runner_name if t.runner_name is defined else
+                           "")
+                        %}
+
+                        <div class="tip-row">
+                          <span class="tip-type tip-type--{{ t.tip_type|lower|replace('_', '-') }}">
+                            {{ type_label }}
+                          </span>
+                          <span class="tip-tab">
+                            #{{ tab_no }}
+                          </span>
+                          <span class="tip-horse">
+                            {{ horse_name }}
+                          </span>
+                        </div>
+                      {% endfor %}
                     </div>
-                  {% endfor %}
-                </div>
-              </article>
-            {% endfor %}
+                  </article>
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+
+            {% if not any_tips %}
+              <p class="empty-state empty-state--mobile">
+                No tips found for this meeting.
+              </p>
+            {% endif %}
           </div>
         </section>
       {% endfor %}
@@ -400,7 +456,6 @@
     color: #4338ca;
   }
 
-  /* Small screens tweak */
   @media (max-width: 480px) {
     .page-root--mobile {
       padding-inline: 0.5rem;
@@ -431,8 +486,6 @@
         body.hidden = expanded;
         section.classList.toggle('meeting-card--open', !expanded);
       });
-
-      // Optional: start collapsed (body.hidden = true already)
     });
   })();
 </script>
