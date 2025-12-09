@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Mobile tips for {{ date.strftime("%A %d %B %Y") }}
+{% endblock %}
+
+{% block body %}
+<main class="page-root page-root--mobile">
+
+  {# --------- Compact mobile header --------- #}
+  <header class="mobile-header">
+    <div class="mobile-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            {{ date.strftime("%a %d %b %Y") }}
+          </div>
+          <div class="brand-subtitle">
+            Tips (mobile view)
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-header-right">
+      <form class="mobile-date-form" method="get" action="/ui/day/mobile">
+        <div class="mobile-date-input-wrap">
+          <span class="mobile-date-icon">📅</span>
+          <input
+            type="date"
+            id="date"
+            name="date"
+            value="{{ date.isoformat() }}"
+          />
+        </div>
+        <button type="submit" class="mobile-btn-go">Go</button>
+      </form>
+    </div>
+  </header>
+
+  {% if meetings|length == 0 %}
+    <p class="empty-state empty-state--mobile">
+      No tips found for this date.
+    </p>
+  {% else %}
+    <section class="meeting-list">
+      {% for m in meetings %}
+        <section class="meeting-card meeting-card--mobile" data-meeting>
+          <button
+            type="button"
+            class="meeting-toggle-row"
+            data-meeting-toggle
+            aria-expanded="false"
+          >
+            <div class="meeting-toggle-text">
+              <div class="meeting-name-row">
+                <span class="meeting-name">
+                  {{ m.meeting.track_name }}
+                </span>
+                <span class="state-pill">
+                  {{ m.meeting.state }}
+                </span>
+              </div>
+              <div class="meeting-meta-small">
+                {{ m.races|length }} races
+                {% if m.meeting.pf_meeting_id %}
+                  · PF {{ m.meeting.pf_meeting_id }}
+                {% endif %}
+              </div>
+            </div>
+            <span class="meeting-chevron" aria-hidden="true">▾</span>
+          </button>
+
+          <div class="meeting-body meeting-body--mobile" data-meeting-body hidden>
+            {% for r in m.races %}
+              <article class="race-mobile">
+                <header class="race-mobile-header">
+                  <div class="race-title-line">
+                    <span class="race-label">R{{ r.race_number }}</span>
+                    {% if r.race_name %}
+                      <span class="race-name">{{ r.race_name }}</span>
+                    {% endif %}
+                  </div>
+                  {% if r.distance_m %}
+                    <span class="race-distance">
+                      {{ r.distance_m }}m
+                    </span>
+                  {% endif %}
+                </header>
+
+                <div class="race-tips-list">
+                  {% for t in r.tips %}
+                    {% set type_label =
+                      "AI BEST" if t.tip_type == "AI_BEST" else
+                      "DANGER"  if t.tip_type == "DANGER"  else
+                      "VALUE"   if t.tip_type == "VALUE"   else
+                      t.tip_type
+                    %}
+                    <div class="tip-row">
+                      <span class="tip-type tip-type--{{ t.tip_type|lower|replace('_', '-') }}">
+                        {{ type_label }}
+                      </span>
+                      <span class="tip-tab">
+                        #{{ t.tab_number }}
+                      </span>
+                      <span class="tip-horse">
+                        {{ t.horse }}
+                      </span>
+                    </div>
+                  {% endfor %}
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+    </section>
+  {% endif %}
+</main>
+
+{# --------- Mobile-specific styles --------- #}
+<style>
+  .page-root--mobile {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0.75rem 0.75rem 1.5rem;
+    background: #f3f4f6;
+  }
+
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .mobile-header-left .brand-lockup {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .brand-logo {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+  }
+
+  .brand-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .brand-subtitle {
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+
+  .mobile-header-right {
+    flex-shrink: 0;
+  }
+
+  .mobile-date-form {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .mobile-date-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+  }
+
+  .mobile-date-icon {
+    font-size: 0.85rem;
+  }
+
+  .mobile-date-input-wrap input[type="date"] {
+    border: none;
+    padding: 0;
+    font-size: 0.75rem;
+    color: #0f172a;
+    background: transparent;
+  }
+
+  .mobile-date-input-wrap input[type="date"]:focus {
+    outline: none;
+  }
+
+  .mobile-btn-go {
+    border: none;
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #047857; /* racing-ish green */
+    color: #ffffff;
+    cursor: pointer;
+  }
+
+  .mobile-btn-go:hover {
+    background: #065f46;
+  }
+
+  .empty-state--mobile {
+    margin-top: 1.5rem;
+    text-align: center;
+    font-size: 0.9rem;
+    color: #6b7280;
+  }
+
+  .meeting-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+
+  .meeting-card--mobile {
+    border-radius: 0.9rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 6px 12px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
+  }
+
+  .meeting-toggle-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 0.8rem 0.9rem;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .meeting-toggle-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .meeting-name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.1rem;
+  }
+
+  .meeting-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .state-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: #e5f3ff;
+    color: #0369a1;
+  }
+
+  .meeting-meta-small {
+    font-size: 0.75rem;
+    color: #6b7280;
+  }
+
+  .meeting-chevron {
+    margin-left: 0.4rem;
+    font-size: 0.85rem;
+    color: #9ca3af;
+    transition: transform 0.16s ease-out;
+  }
+
+  .meeting-card--mobile.meeting-card--open .meeting-chevron {
+    transform: rotate(180deg);
+  }
+
+  .meeting-body--mobile {
+    border-top: 1px solid #e5e7eb;
+    background: #f9fafb;
+    padding: 0.55rem 0.75rem 0.75rem;
+  }
+
+  .race-mobile {
+    padding: 0.5rem 0.45rem;
+    border-radius: 0.6rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 0.4rem;
+  }
+
+  .race-mobile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.3rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .race-title-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: baseline;
+  }
+
+  .race-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #111827;
+  }
+
+  .race-name {
+    font-size: 0.78rem;
+    color: #4b5563;
+  }
+
+  .race-distance {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #047857;
+  }
+
+  .race-tips-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .tip-row {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.25rem 0.4rem;
+    font-size: 0.8rem;
+  }
+
+  .tip-type {
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .tip-tab {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    color: #374151;
+    white-space: nowrap;
+  }
+
+  .tip-horse {
+    min-width: 0;
+    font-weight: 500;
+    color: #111827;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Type colours */
+  .tip-type--ai-best {
+    background: #ecfdf3;
+    color: #166534;
+  }
+
+  .tip-type--danger {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  .tip-type--value {
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+
+  /* Fallback for any other type */
+  .tip-type:not(.tip-type--ai-best):not(.tip-type--danger):not(.tip-type--value) {
+    background: #eef2ff;
+    color: #4338ca;
+  }
+
+  /* Small screens tweak */
+  @media (max-width: 480px) {
+    .page-root--mobile {
+      padding-inline: 0.5rem;
+    }
+
+    .race-mobile {
+      padding-inline: 0.4rem;
+    }
+
+    .tip-row {
+      grid-template-columns: auto auto minmax(0, 1fr);
+    }
+  }
+</style>
+
+{# --------- Collapse behaviour --------- #}
+<script>
+  (function () {
+    const meetingSections = document.querySelectorAll('[data-meeting]');
+    meetingSections.forEach(section => {
+      const toggle = section.querySelector('[data-meeting-toggle]');
+      const body = section.querySelector('[data-meeting-body]');
+      if (!toggle || !body) return;
+
+      toggle.addEventListener('click', () => {
+        const expanded = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', String(!expanded));
+        body.hidden = expanded;
+        section.classList.toggle('meeting-card--open', !expanded);
+      });
+
+      // Optional: start collapsed (body.hidden = true already)
+    });
+  })();
+</script>
+{% endblock %}
