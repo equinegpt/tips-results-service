@@ -418,8 +418,8 @@ def ui_day(
             "day_summary": day_summary,
         },
     )
-@app.get("/ui/day/mobile", response_class=HTMLResponse)
-def ui_day_mobile(
+@router.get("/ui/day/mobile", response_class=HTMLResponse)
+async def ui_day_mobile(
     date: dt.date = Query(dt.date.today()),
     db: Session = Depends(get_db),
 ):
