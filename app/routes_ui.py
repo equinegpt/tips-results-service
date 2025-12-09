@@ -418,3 +418,20 @@ def ui_day(
             "day_summary": day_summary,
         },
     )
+@app.get("/ui/day/mobile", response_class=HTMLResponse)
+def ui_day_mobile(
+    date: dt.date = Query(dt.date.today()),
+    db: Session = Depends(get_db),
+):
+    # reuse the same loader you use for /ui/day
+    meetings, day_summary, display_date = load_day_view(date, db)
+    return templates.TemplateResponse(
+        "day_mobile.html",
+        {
+            "request": request,
+            "date": date,
+            "meetings": meetings,
+            "day_summary": day_summary,
+            "display_date": display_date,
+        },
+    )
