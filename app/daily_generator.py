@@ -340,7 +340,6 @@ def build_generate_tips_payloads_for_date(
     project_id: str,
     *,
     force_all_meetings: bool = False,
-    track_types: Optional[Sequence[str]] = None,
 ) -> List[schemas.GenerateTipsIn]:
     """
     Build one GenerateTipsIn payload per meeting for the given date,
@@ -361,14 +360,6 @@ def build_generate_tips_payloads_for_date(
 
       • HK / NZ are always excluded by state/country.
 
-    track_types (optional):
-      • If None (default):
-          Use the above rules with M + P always allowed and C subject
-          to the big-maiden rule.
-      • If provided (e.g. ["M", "P"] or ["M", "P", "C"]):
-          Acts as an explicit allowlist of meeting types when
-          force_all_meetings is False.
-
     Manual overrides:
       - /cron/generate-meeting-tips uses force_all_meetings=True so you
         can always pull ANY meeting (even small Country cards) by pf_meeting_id.
@@ -380,18 +371,8 @@ def build_generate_tips_payloads_for_date(
     # Optional debug: lets you see what the caller passed in
     print(
         f"[DG] build_generate_tips_payloads_for_date: "
-        f"target_date={target_date}, force_all_meetings={force_all_meetings}, "
-        f"track_types={track_types}"
+        f"target_date={target_date}, force_all_meetings={force_all_meetings}"
     )
-
-    # Normalise track_types into an allowlist of meeting types.
-    # Only applied when force_all_meetings == False.
-    if track_types is not None:
-        include_types: Set[str] = {t.upper() for t in track_types}
-    else:
-        # Default: we conceptually allow M, P, C; C is then filtered by the
-        # big-maiden rule below.
-        include_types = {"M", "P", "C"}
 
     # Group by (date, track_name, state)
     meetings: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
@@ -449,24 +430,15 @@ def build_generate_tips_payloads_for_date(
         is_country = not (is_metro or is_prov)  # treat everything else as Country
 
         # When force_all_meetings=True, we deliberately bypass *all* filters
-        # (meeting_type allowlist + big-maiden rule) so overrides always work.
+        # (big-maiden rule), so overrides always work.
         if not force_all_meetings:
-            # 1) Honour explicit type allowlist if provided
-            if meeting_type not in include_types:
+            # Country big-maiden rule
+            if is_country and not _meeting_has_big_maiden(race_list, threshold=29000):
                 print(
-                    f"[DG] Skipping meeting {track_name} {state} on {meeting_date} "
-                    f"(type={meeting_type}) – not in track_types filter {include_types}"
+                    f"[DG] Skipping COUNTRY meeting {track_name} {state} on "
+                    f"{meeting_date} (type={meeting_type}) – no Maiden > 29k"
                 )
                 continue
-
-            # 2) Country big-maiden rule
-            if is_country:
-                if not _meeting_has_big_maiden(race_list, threshold=29000):
-                    print(
-                        f"[DG] Skipping COUNTRY meeting {track_name} {state} on "
-                        f"{meeting_date} (type={meeting_type}) – no Maiden > 29k"
-                    )
-                    continue
             # Metro & Provincial always included if we reach here
 
         # --- pf_meeting_id from RA /races (must be explicitly mapped) ---

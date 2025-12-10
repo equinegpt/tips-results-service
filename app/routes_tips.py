@@ -241,7 +241,7 @@ def cron_generate_daily_tips(
     payloads = daily_generator.build_generate_tips_payloads_for_date(
     target_date=target_date,
     project_id=project_id,
-    track_types={"M", "P"},  # Metro + Provincial only
+    force_all_meetings=False,   # daily
     )
     print(f"[CRON] daily_generator returned {len(payloads)} meetings")
 
@@ -383,7 +383,7 @@ def cron_generate_meeting_tips(
     payloads = daily_generator.build_generate_tips_payloads_for_date(
     target_date=target_date,
     project_id=project_id,
-    track_types=None,  # include M, P, C (still excludes HK/NZ)
+    force_all_meetings=True,    # manual /cron override
     )
 
     print(f"[CRON] daily_generator returned {len(payloads)} meetings for {target_date}")
