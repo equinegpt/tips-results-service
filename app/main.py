@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, engine
+from .admin_meetings import router as admin_meetings_router
 
 from .routes_health import router as health_router
 from .routes_tips import router as tips_router
@@ -30,3 +31,4 @@ app.include_router(cron_router)
 app.include_router(ui_router)
 app.include_router(ui_overview_router)
 app.include_router(debug_router)
+app.include_router(admin_meetings_router)
