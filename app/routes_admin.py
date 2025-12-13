@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .database import get_db
 from . import models
+from .models import Meeting
 from .clients import ireel_client
 
 router = APIRouter()
