@@ -183,10 +183,10 @@ class IreelClient:
             lines.append(f"TRACK CONDITION (official): {track_condition}")
 
         lines.append("")
-        lines.append("Please reply with short mobile-length tips:")
-        lines.append('• "AI Best: #<TAB> <Horse> — <one-sentence reason>"')
-        lines.append('• "Danger: #<TAB> <Horse> — <one-sentence reason>"')
-        lines.append('• "Value: #<TAB> <Horse> — <one-sentence reason>"')
+        lines.append("Please reply with tips as instructed:")
+        lines.append('• "AI Best: #<TAB> <Horse> — <reason>"')
+        lines.append('• "Danger: #<TAB> <Horse> — <reason>"')
+        lines.append('• "Value: #<TAB> <Horse> — <reason>"')
         lines.append("No extra commentary.")
 
         return "\n".join(lines)
