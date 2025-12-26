@@ -36,6 +36,7 @@ class RaceBase(BaseModel):
 
 class RaceOut(RaceBase):
     id: UUID
+    pf_meeting_id: Optional[int] = None
 
     class Config:
         from_attributes = True

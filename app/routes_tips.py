@@ -487,6 +487,7 @@ def list_tips(
                 continue
 
             race_out = schemas.RaceOut.model_validate(race)
+            race_out.pf_meeting_id = meeting.pf_meeting_id
             tip_outs = [schemas.TipOut.model_validate(t) for t in race_tips]
 
             races_with_tips.append(
