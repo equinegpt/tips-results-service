@@ -355,6 +355,22 @@ def compute_trends(
     results_index = _build_results_index(all_results)
     print(f"[TRENDS] Results index has {len(results_index)} entries")
 
+    # Count how many tips have matching results
+    tips_with_match = sum(1 for t in all_tips if (t.meeting_date, t.state, t.race_number, t.tab_number) in results_index)
+    print(f"[TRENDS] Tips with matching results: {tips_with_match} / {len(all_tips)}")
+
+    # Check for duplicate tip keys (same horse tipped multiple times in same race)
+    tip_keys = [(t.meeting_date, t.state, t.race_number, t.tab_number) for t in all_tips]
+    unique_tip_keys = set(tip_keys)
+    if len(tip_keys) != len(unique_tip_keys):
+        dupes = len(tip_keys) - len(unique_tip_keys)
+        print(f"[TRENDS] Note: {dupes} tips share same horse (different tip_types for same runner)")
+
+    # Full tip keys including tip_type
+    full_tip_keys = [(t.meeting_date, t.state, t.race_number, t.tab_number, t.tip_type) for t in all_tips]
+    unique_full_keys = set(full_tip_keys)
+    print(f"[TRENDS] Unique tip combinations: {len(unique_full_keys)}")
+
     # Debug: show sample keys from both
     sample_tip_keys = []
     for t in all_tips[:5]:
