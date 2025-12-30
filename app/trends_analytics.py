@@ -253,8 +253,16 @@ def compute_trends(
             finish_pos = race_result.finish_position
             sp = race_result.starting_price
 
+        # Skip tips without any result data (results not yet processed)
+        if outcome is None and race_result is None:
+            continue
+
         # Skip scratched/pending
         if outcome and outcome.outcome_status in ("SCRATCHED", "NO_RESULT", "PENDING"):
+            continue
+
+        # Skip if we have no finish position (no result data)
+        if finish_pos is None:
             continue
 
         # Determine bucket keys
