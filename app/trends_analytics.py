@@ -257,8 +257,9 @@ def compute_trends(
     by_track: Dict[str, TrendBucket] = {}
 
     tips_with_results = 0
+    total_tips_counted = 0
 
-    # Process each tip
+    # Process each tip (count ALL tips like Overview does)
     for tip, race, meeting in rows:
         # Look up RA result for this tip (same matching as Overview)
         ra_key = (
@@ -286,22 +287,24 @@ def compute_trends(
                 if ra_row is None:
                     ra_row = candidates[0]
 
-        # Skip tips without results
-        if ra_row is None:
+        # Determine finish position and SP from RA results (if available)
+        finish_pos: Optional[int] = None
+        sp: Any = None
+        is_scratched = False
+
+        if ra_row is not None:
+            is_scratched = getattr(ra_row, "is_scratched", False)
+            if not is_scratched:
+                finish_pos = getattr(ra_row, "finishing_pos", None)
+                sp = getattr(ra_row, "starting_price", None)
+                if finish_pos is not None:
+                    tips_with_results += 1
+
+        # Skip scratched runners (don't count them at all)
+        if is_scratched:
             continue
 
-        # Skip scratched
-        if getattr(ra_row, "is_scratched", False):
-            continue
-
-        finish_pos = getattr(ra_row, "finishing_pos", None)
-        sp = getattr(ra_row, "starting_price", None)
-
-        # Skip if no finish position
-        if finish_pos is None:
-            continue
-
-        tips_with_results += 1
+        total_tips_counted += 1
 
         # Determine bucket keys
         distance_key = _get_distance_bucket(race.distance_m)
@@ -313,19 +316,21 @@ def compute_trends(
         tip_type_key = tip.tip_type
         track_key = f"{meeting.track_name} ({meeting.state})"
 
-        # Helper to update a bucket
-        def update_bucket(buckets: Dict[str, TrendBucket], key: str, pos: int):
+        # Helper to update a bucket - counts all tips, only records positions for resolved tips
+        def update_bucket(buckets: Dict[str, TrendBucket], key: str, pos: Optional[int]):
             if key not in buckets:
                 buckets[key] = TrendBucket(label=key)
             bucket = buckets[key]
             bucket.tips += 1
 
-            if pos == 1:
-                bucket.wins += 1
-            elif pos == 2:
-                bucket.seconds += 1
-            elif pos == 3:
-                bucket.thirds += 1
+            # Only record position if we have a result
+            if pos is not None:
+                if pos == 1:
+                    bucket.wins += 1
+                elif pos == 2:
+                    bucket.seconds += 1
+                elif pos == 3:
+                    bucket.thirds += 1
 
         # Update all dimension buckets
         update_bucket(by_distance, distance_key, finish_pos)
@@ -337,10 +342,11 @@ def compute_trends(
         update_bucket(by_tip_type, tip_type_key, finish_pos)
         update_bucket(by_track, track_key, finish_pos)
 
+    print(f"[TRENDS] Total tips counted: {total_tips_counted}")
     print(f"[TRENDS] Tips with RA results: {tips_with_results}")
 
-    if tips_with_results == 0:
-        return {"error": "No tips with results found", "has_data": False}
+    if total_tips_counted == 0:
+        return {"error": "No tips found", "has_data": False}
 
     # Sort and convert to output format
     def sort_buckets(buckets: Dict[str, TrendBucket], sort_key: str = "win_strike_rate") -> List[Dict]:
