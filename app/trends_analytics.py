@@ -1,13 +1,12 @@
 # app/trends_analytics.py
 """
-Trend analytics built fresh from two data sources:
-- Tips: https://tips-results-service.onrender.com/tips?date=YYYY-MM-DD
+Trend analytics built from:
+- Tips: Read DIRECTLY from local database (no external API call)
 - Results: https://ra-crawler.onrender.com/results?date=YYYY-MM-DD
 
 Matching key: (date, state, race_number, tab_number/horse_number)
 
-Uses in-memory caching to ensure data consistency within analysis runs
-and to avoid hammering external APIs on every page load.
+Results API calls are cached to reduce external requests.
 """
 from __future__ import annotations
 
@@ -25,13 +24,11 @@ from . import models
 
 
 # ============================================================================
-# CACHING LAYER
-# Cache fetched data for 5 minutes to ensure consistency within analysis runs
-# and avoid re-fetching on every page load.
+# CACHING LAYER - Only for external Results API
+# Tips are read directly from database (instant, reliable)
 # ============================================================================
 _CACHE_TTL_SECONDS = 300  # 5 minutes
 
-_tips_cache: Dict[date, Tuple[float, List["FlatTip"]]] = {}  # date -> (timestamp, tips)
 _results_cache: Dict[date, Tuple[float, List["FlatResult"]]] = {}  # date -> (timestamp, results)
 
 
@@ -41,9 +38,8 @@ def _is_cache_valid(timestamp: float) -> bool:
 
 
 def clear_trends_cache():
-    """Clear all cached data - useful for testing or forcing refresh"""
-    global _tips_cache, _results_cache
-    _tips_cache.clear()
+    """Clear results cache"""
+    global _results_cache
     _results_cache.clear()
     print("[TRENDS] Cache cleared")
 
@@ -114,84 +110,41 @@ class FlatResult:
     starting_price: Optional[float]
 
 
-def _fetch_tips_for_date(d: date, use_cache: bool = True) -> List[FlatTip]:
+def _fetch_tips_from_db(db: Session, d: date) -> List[FlatTip]:
     """
-    Fetch tips from Tips Service API for a single date.
-    GET /tips?date=YYYY-MM-DD
-
-    Uses caching to ensure consistency and reduce API calls.
-    Includes retry logic for reliability.
+    Read tips directly from the local database for a single date.
+    This is instant and reliable - no external API calls needed.
     """
-    global _tips_cache
-
-    # Check cache first
-    if use_cache and d in _tips_cache:
-        timestamp, cached_tips = _tips_cache[d]
-        if _is_cache_valid(timestamp):
-            return cached_tips
-
-    base_url = os.getenv("TIPS_SERVICE_BASE_URL", "https://tips-results-service.onrender.com")
-    url = f"{base_url.rstrip('/')}/tips"
-
     tips: List[FlatTip] = []
-    max_retries = 3
-    last_error = None
 
-    for attempt in range(max_retries):
-        try:
-            with httpx.Client(timeout=60.0) as client:  # Increased timeout from 30s
-                resp = client.get(url, params={"date": d.isoformat()})
-                resp.raise_for_status()
-                data = resp.json()
+    # Query meetings for this date
+    meetings = db.query(models.Meeting).filter(models.Meeting.date == d).all()
 
-            # Data structure: list of {meeting: {...}, races: [{race: {...}, tips: [...]}]}
-            for meeting_obj in data:
-                meeting = meeting_obj.get("meeting", {})
-                meeting_date = d
-                state = (meeting.get("state") or "").upper()
-                track_name = meeting.get("track_name") or ""
+    for meeting in meetings:
+        state = (meeting.state or "").upper()
+        track_name = meeting.track_name or ""
 
-                for race_obj in meeting_obj.get("races", []):
-                    race = race_obj.get("race", {})
-                    race_number = race.get("race_number")
-                    distance_m = race.get("distance_m")
-                    class_text = race.get("class_text")
-                    race_name = race.get("name")
+        for race in meeting.races:
+            race_number = race.race_number
+            distance_m = race.distance_m
+            class_text = race.class_text
+            race_name = race.name
 
-                    if race_number is None:
-                        continue
+            for tip in race.tips:
+                tips.append(FlatTip(
+                    meeting_date=d,
+                    state=state,
+                    track_name=track_name,
+                    race_number=race_number,
+                    tab_number=tip.tab_number,
+                    horse_name=tip.horse_name or f"#{tip.tab_number}",
+                    tip_type=tip.tip_type or "UNKNOWN",
+                    distance_m=distance_m,
+                    class_text=class_text,
+                    race_name=race_name,
+                ))
 
-                    for tip in race_obj.get("tips", []):
-                        tab_number = tip.get("tab_number")
-                        if tab_number is None:
-                            continue
-
-                        tips.append(FlatTip(
-                            meeting_date=meeting_date,
-                            state=state,
-                            track_name=track_name,
-                            race_number=int(race_number),
-                            tab_number=int(tab_number),
-                            horse_name=tip.get("horse_name") or f"#{tab_number}",
-                            tip_type=tip.get("tip_type") or "UNKNOWN",
-                            distance_m=distance_m,
-                            class_text=class_text,
-                            race_name=race_name,
-                        ))
-
-            # Success - cache and return
-            _tips_cache[d] = (time.time(), tips)
-            return tips
-
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries - 1:
-                print(f"[TRENDS] Retry {attempt + 1}/{max_retries} for tips {d}: {e}")
-                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
-            else:
-                print(f"[TRENDS] Failed fetching tips for {d} after {max_retries} attempts: {e}")
-
-    return tips  # Return empty list if all retries failed
+    return tips
 
 
 def _fetch_results_for_date(d: date, use_cache: bool = True) -> List[FlatResult]:
@@ -384,16 +337,16 @@ def _get_class_bucket(class_text: Optional[str], race_name: Optional[str]) -> st
 
 
 def compute_trends(
-    db: Session,  # Not used anymore but keeping for API compatibility
+    db: Session,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
     Compute comprehensive trend analysis across all dimensions.
 
-    Fetches data directly from:
-    - Tips API: /tips?date=YYYY-MM-DD
-    - RA Crawler: /results?date=YYYY-MM-DD
+    Data sources:
+    - Tips: Read directly from local database (instant, reliable)
+    - Results: RA Crawler API /results?date=YYYY-MM-DD (cached)
 
     Matches tips to results using: (date, state, race_number, tab_number)
     """
@@ -405,35 +358,36 @@ def compute_trends(
 
     print(f"[TRENDS] Computing trends from {date_from} to {date_to}")
 
-    # Track cache stats for debugging
+    # Track cache stats for results API
     cache_hits = 0
     cache_misses = 0
 
-    # 1) Fetch all tips and results for the date range
+    # 1) Fetch all tips (from DB) and results (from API) for the date range
     all_tips: List[FlatTip] = []
     all_results: List[FlatResult] = []
 
     day = date_from
     while day <= date_to:
-        # Check if we'll hit cache
-        tips_cached = day in _tips_cache and _is_cache_valid(_tips_cache[day][0])
-        results_cached = day in _results_cache and _is_cache_valid(_results_cache[day][0])
+        # Tips from database (instant)
+        tips = _fetch_tips_from_db(db, day)
 
-        tips = _fetch_tips_for_date(day)
+        # Results from API (cached)
+        results_cached = day in _results_cache and _is_cache_valid(_results_cache[day][0])
         results = _fetch_results_for_date(day)
 
-        if tips_cached:
+        if results_cached:
             cache_hits += 1
         else:
             cache_misses += 1
 
-        print(f"[TRENDS] {day}: {len(tips)} tips, {len(results)} results {'(cached)' if tips_cached else '(fetched)'}")
+        if tips:  # Only log days with tips
+            print(f"[TRENDS] {day}: {len(tips)} tips (DB), {len(results)} results {'(cached)' if results_cached else '(fetched)'}")
 
         all_tips.extend(tips)
         all_results.extend(results)
         day += timedelta(days=1)
 
-    print(f"[TRENDS] Cache stats: {cache_hits} hits, {cache_misses} misses")
+    print(f"[TRENDS] Results cache: {cache_hits} hits, {cache_misses} misses")
 
     print(f"[TRENDS] Total: {len(all_tips)} tips, {len(all_results)} results")
 

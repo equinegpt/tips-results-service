@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from datetime import date as date_type, timedelta
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 
+from .database import get_db
 from .reasoning_analytics import compute_reasoning_trends
 
 router = APIRouter()
@@ -21,6 +23,7 @@ templates = Jinja2Templates(directory="templates")
 def api_reasoning(
     from_date: date_type | None = Query(None, alias="from"),
     to_date: date_type | None = Query(None, alias="to"),
+    db: Session = Depends(get_db),
 ):
     """
     JSON API for reasoning analysis data.
@@ -34,6 +37,7 @@ def api_reasoning(
         from_date = to_date - timedelta(days=30)
 
     return compute_reasoning_trends(
+        db=db,
         date_from=from_date,
         date_to=to_date,
     )
@@ -44,6 +48,7 @@ def ui_reasoning(
     request: Request,
     from_date: date_type | None = Query(None),
     to_date: date_type | None = Query(None),
+    db: Session = Depends(get_db),
 ):
     """
     HTML dashboard for reasoning analysis.
@@ -54,6 +59,7 @@ def ui_reasoning(
         from_date = to_date - timedelta(days=30)
 
     data = compute_reasoning_trends(
+        db=db,
         date_from=from_date,
         date_to=to_date,
     )

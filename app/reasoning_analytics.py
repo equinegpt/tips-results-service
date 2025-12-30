@@ -4,7 +4,9 @@ Phase 2 Analytics: Analyze which reasoning phrases correlate with winning tips.
 
 Extracts key phrases from tip reasoning and tracks their win/place rates.
 
-Uses same caching approach as trends_analytics.py for consistency.
+Data sources:
+- Tips: Read DIRECTLY from local database (instant, reliable)
+- Results: RA Crawler API (cached)
 """
 from __future__ import annotations
 
@@ -17,14 +19,16 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
+from sqlalchemy.orm import Session
+
+from . import models
 
 
 # ============================================================================
-# CACHING LAYER - shared TTL with trends_analytics
+# CACHING LAYER - Only for external Results API
 # ============================================================================
 _CACHE_TTL_SECONDS = 300  # 5 minutes
 
-_reasoning_tips_cache: Dict[date, Tuple[float, List[Dict[str, Any]]]] = {}
 _reasoning_results_cache: Dict[date, Tuple[float, Dict]] = {}
 
 
@@ -34,9 +38,8 @@ def _is_cache_valid(timestamp: float) -> bool:
 
 
 def clear_reasoning_cache():
-    """Clear all cached data"""
-    global _reasoning_tips_cache, _reasoning_results_cache
-    _reasoning_tips_cache.clear()
+    """Clear results cache"""
+    global _reasoning_results_cache
     _reasoning_results_cache.clear()
     print("[REASONING] Cache cleared")
 
@@ -142,67 +145,31 @@ def _extract_phrases(reasoning: str) -> Set[str]:
     return found
 
 
-def _fetch_tips_for_date(d: date, use_cache: bool = True) -> List[Dict[str, Any]]:
-    """Fetch tips with full details including reasoning. Includes retry logic."""
-    global _reasoning_tips_cache
-
-    # Check cache first
-    if use_cache and d in _reasoning_tips_cache:
-        timestamp, cached_tips = _reasoning_tips_cache[d]
-        if _is_cache_valid(timestamp):
-            return cached_tips
-
-    base_url = os.getenv("TIPS_SERVICE_BASE_URL", "https://tips-results-service.onrender.com")
-    url = f"{base_url.rstrip('/')}/tips"
-
+def _fetch_tips_from_db(db: Session, d: date) -> List[Dict[str, Any]]:
+    """Read tips with reasoning directly from the local database."""
     tips = []
-    max_retries = 3
 
-    for attempt in range(max_retries):
-        try:
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.get(url, params={"date": d.isoformat()})
-                resp.raise_for_status()
-                data = resp.json()
+    # Query meetings for this date
+    meetings = db.query(models.Meeting).filter(models.Meeting.date == d).all()
 
-            for meeting_obj in data:
-                meeting = meeting_obj.get("meeting", {})
-                state = (meeting.get("state") or "").upper()
-                track_name = meeting.get("track_name") or ""
+    for meeting in meetings:
+        state = (meeting.state or "").upper()
+        track_name = meeting.track_name or ""
 
-                for race_obj in meeting_obj.get("races", []):
-                    race = race_obj.get("race", {})
-                    race_number = race.get("race_number")
+        for race in meeting.races:
+            race_number = race.race_number
 
-                    if race_number is None:
-                        continue
-
-                    for tip in race_obj.get("tips", []):
-                        tab_number = tip.get("tab_number")
-                        if tab_number is None:
-                            continue
-
-                        tips.append({
-                            "date": d,
-                            "state": state,
-                            "track_name": track_name,
-                            "race_number": int(race_number),
-                            "tab_number": int(tab_number),
-                            "horse_name": tip.get("horse_name") or "",
-                            "tip_type": tip.get("tip_type") or "UNKNOWN",
-                            "reasoning": tip.get("reasoning") or "",
-                        })
-
-            # Success - cache and return
-            _reasoning_tips_cache[d] = (time.time(), tips)
-            return tips
-
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"[REASONING] Retry {attempt + 1}/{max_retries} for tips {d}: {e}")
-                time.sleep(2 ** attempt)
-            else:
-                print(f"[REASONING] Failed fetching tips for {d} after {max_retries} attempts: {e}")
+            for tip in race.tips:
+                tips.append({
+                    "date": d,
+                    "state": state,
+                    "track_name": track_name,
+                    "race_number": race_number,
+                    "tab_number": tip.tab_number,
+                    "horse_name": tip.horse_name or "",
+                    "tip_type": tip.tip_type or "UNKNOWN",
+                    "reasoning": tip.reasoning or "",
+                })
 
     return tips
 
@@ -260,11 +227,16 @@ def _fetch_results_for_date(d: date, use_cache: bool = True) -> Dict[Tuple[str, 
 
 
 def compute_reasoning_trends(
+    db: Session,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
     Analyze which reasoning phrases correlate with better results.
+
+    Data sources:
+    - Tips: Read directly from local database (instant, reliable)
+    - Results: RA Crawler API (cached)
     """
     if date_to is None:
         date_to = date.today()
@@ -291,7 +263,7 @@ def compute_reasoning_trends(
     # Process each day
     day = date_from
     while day <= date_to:
-        tips = _fetch_tips_for_date(day)
+        tips = _fetch_tips_from_db(db, day)
         results = _fetch_results_for_date(day)
 
         print(f"[REASONING] {day}: {len(tips)} tips, {len(results)} results")
