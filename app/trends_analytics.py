@@ -8,19 +8,21 @@ Deep analytics for identifying winning trends across various dimensions:
 - Race classes (Maiden, etc.)
 - States
 - Tip types
+
+Uses RA Crawler results as primary source (same as Overview page).
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models
+from .ra_results_client import RAResultsClient
+from .daily_generator import _tracks_match
 
 
 @dataclass
@@ -58,17 +60,6 @@ class TrendBucket:
             "win_strike_rate": round(self.win_strike_rate, 1),
             "place_strike_rate": round(self.place_strike_rate, 1),
         }
-
-
-def _safe_decimal(value: Any) -> Decimal:
-    if value is None:
-        return Decimal("0")
-    if isinstance(value, Decimal):
-        return value
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return Decimal("0")
 
 
 def _get_distance_bucket(distance_m: Optional[int]) -> str:
@@ -119,7 +110,6 @@ def _get_price_bucket(sp: Optional[Decimal]) -> str:
 def _get_track_type(track_name: str) -> str:
     """
     Determine track type based on track name.
-    This is a simplified heuristic - ideally we'd have this data from PF/RA.
     """
     metro_tracks = {
         "flemington", "caulfield", "moonee valley", "sandown",
@@ -131,31 +121,26 @@ def _get_track_type(track_name: str) -> str:
 
     track_lower = track_name.lower()
 
-    # Check for metro tracks
     for metro in metro_tracks:
         if metro in track_lower:
             return "Metro"
 
-    # Provincial indicators
     provincial_indicators = ["park", "gardens", "lakeside"]
     for ind in provincial_indicators:
         if ind in track_lower:
             return "Provincial"
 
-    # Default to Provincial for known larger tracks, Country for others
-    # This is imperfect but gives us something to work with
     return "Provincial/Country"
 
 
 def _get_class_bucket(class_text: Optional[str], race_name: Optional[str]) -> str:
     """Categorize race class"""
+    import re
     text = ((class_text or "") + " " + (race_name or "")).lower()
 
     if "maiden" in text:
         return "Maiden"
     elif "benchmark" in text or "bm" in text:
-        # Try to extract BM number
-        import re
         match = re.search(r'(?:benchmark|bm)\s*(\d+)', text)
         if match:
             bm = int(match.group(1))
@@ -169,7 +154,6 @@ def _get_class_bucket(class_text: Optional[str], race_name: Optional[str]) -> st
                 return "BM82+"
         return "Benchmark"
     elif "class" in text:
-        import re
         match = re.search(r'class\s*(\d+)', text)
         if match:
             return f"Class {match.group(1)}"
@@ -188,6 +172,47 @@ def _get_class_bucket(class_text: Optional[str], race_name: Optional[str]) -> st
         return "Other"
 
 
+def _build_ra_results_index(
+    date_from: date,
+    date_to: date,
+) -> Dict[Tuple[date, str, int, int], List[Any]]:
+    """
+    Build index over RA Crawler results for the date window.
+    Key: (meeting_date, STATE, race_no, tab_number) -> list[RAResultRow]
+
+    Same approach as routes_ui_overview.py uses.
+    """
+    runner_index: Dict[Tuple[date, str, int, int], List[Any]] = {}
+
+    client = RAResultsClient()
+    try:
+        day = date_from
+        while day <= date_to:
+            try:
+                rows = client.fetch_results_for_date(day)
+                print(f"[TRENDS] RA rows for {day}: {len(rows)}")
+            except Exception as e:
+                print(f"[TRENDS] error fetching RA rows for {day}: {e}")
+                rows = []
+
+            for r in rows:
+                k_runner = (
+                    r.meeting_date,
+                    (r.state or "").upper(),
+                    r.race_no,
+                    r.tab_number,
+                )
+                runner_index.setdefault(k_runner, []).append(r)
+
+            day += timedelta(days=1)
+    finally:
+        client.close()
+
+    total_runner = sum(len(v) for v in runner_index.values())
+    print(f"[TRENDS] RA runner_index total rows = {total_runner}")
+    return runner_index
+
+
 def compute_trends(
     db: Session,
     date_from: Optional[date] = None,
@@ -195,40 +220,31 @@ def compute_trends(
 ) -> Dict[str, Any]:
     """
     Compute comprehensive trend analysis across all dimensions.
-    Returns data suitable for dashboard visualization.
+    Uses RA Crawler results as primary source (same as Overview page).
     """
+    # Default to last 60 days
+    if date_to is None:
+        date_to = date.today()
+    if date_from is None:
+        date_from = date_to - timedelta(days=60)
 
-    # Build base query with all necessary joins
-    q = (
-        db.query(
-            models.Tip,
-            models.TipOutcome,
-            models.Race,
-            models.Meeting,
-            models.RaceResult,
-        )
+    # 1) Build RA results index for the window (same as Overview)
+    ra_index = _build_ra_results_index(date_from, date_to)
+
+    # 2) Fetch all tips in that window
+    rows = (
+        db.query(models.Tip, models.Race, models.Meeting)
         .join(models.Race, models.Tip.race_id == models.Race.id)
         .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
-        .outerjoin(
-            models.TipOutcome,
-            models.TipOutcome.tip_id == models.Tip.id,
-        )
-        .outerjoin(
-            models.RaceResult,
-            (models.RaceResult.race_id == models.Race.id) &
-            (models.RaceResult.tab_number == models.Tip.tab_number),
-        )
+        .filter(models.Meeting.date >= date_from)
+        .filter(models.Meeting.date <= date_to)
+        .all()
     )
 
-    if date_from:
-        q = q.filter(models.Meeting.date >= date_from)
-    if date_to:
-        q = q.filter(models.Meeting.date <= date_to)
-
-    rows = q.all()
-
     if not rows:
-        return {"error": "No data found", "has_data": False}
+        return {"error": "No tips found", "has_data": False}
+
+    print(f"[TRENDS] Tips in window {date_from} -> {date_to}: {len(rows)}")
 
     # Initialize buckets for each dimension
     by_distance: Dict[str, TrendBucket] = {}
@@ -240,34 +256,56 @@ def compute_trends(
     by_tip_type: Dict[str, TrendBucket] = {}
     by_track: Dict[str, TrendBucket] = {}
 
+    tips_with_results = 0
+
     # Process each tip
-    for tip, outcome, race, meeting, race_result in rows:
-        # Get finish position
-        finish_pos = None
-        sp = None
+    for tip, race, meeting in rows:
+        # Look up RA result for this tip (same matching as Overview)
+        ra_key = (
+            meeting.date,
+            (meeting.state or "").upper(),
+            race.race_number,
+            tip.tab_number,
+        )
+        candidates = ra_index.get(ra_key) or []
 
-        if outcome:
-            finish_pos = outcome.finish_position
-            sp = outcome.starting_price
-        elif race_result:
-            finish_pos = race_result.finish_position
-            sp = race_result.starting_price
+        # Find matching RA row (with fuzzy track matching if multiple)
+        ra_row = None
+        if candidates:
+            mt_track = meeting.track_name or ""
+            if len(candidates) == 1:
+                ra_row = candidates[0]
+            else:
+                for cand in candidates:
+                    try:
+                        if _tracks_match(mt_track, getattr(cand, "track", "") or ""):
+                            ra_row = cand
+                            break
+                    except Exception:
+                        pass
+                if ra_row is None:
+                    ra_row = candidates[0]
 
-        # Skip tips without any result data (results not yet processed)
-        if outcome is None and race_result is None:
+        # Skip tips without results
+        if ra_row is None:
             continue
 
-        # Skip scratched/pending
-        if outcome and outcome.outcome_status in ("SCRATCHED", "NO_RESULT", "PENDING"):
+        # Skip scratched
+        if getattr(ra_row, "is_scratched", False):
             continue
 
-        # Skip if we have no finish position (no result data)
+        finish_pos = getattr(ra_row, "finishing_pos", None)
+        sp = getattr(ra_row, "starting_price", None)
+
+        # Skip if no finish position
         if finish_pos is None:
             continue
 
+        tips_with_results += 1
+
         # Determine bucket keys
         distance_key = _get_distance_bucket(race.distance_m)
-        price_key = _get_price_bucket(sp) if sp else "Unknown"
+        price_key = _get_price_bucket(Decimal(str(sp)) if sp else None)
         track_type_key = _get_track_type(meeting.track_name)
         race_num_key = f"Race {race.race_number}"
         class_key = _get_class_bucket(race.class_text, race.name)
@@ -276,33 +314,37 @@ def compute_trends(
         track_key = f"{meeting.track_name} ({meeting.state})"
 
         # Helper to update a bucket
-        def update_bucket(buckets: Dict[str, TrendBucket], key: str):
+        def update_bucket(buckets: Dict[str, TrendBucket], key: str, pos: int):
             if key not in buckets:
                 buckets[key] = TrendBucket(label=key)
             bucket = buckets[key]
             bucket.tips += 1
 
-            if finish_pos == 1:
+            if pos == 1:
                 bucket.wins += 1
-            elif finish_pos == 2:
+            elif pos == 2:
                 bucket.seconds += 1
-            elif finish_pos == 3:
+            elif pos == 3:
                 bucket.thirds += 1
 
         # Update all dimension buckets
-        update_bucket(by_distance, distance_key)
-        update_bucket(by_price, price_key)
-        update_bucket(by_track_type, track_type_key)
-        update_bucket(by_race_number, race_num_key)
-        update_bucket(by_class, class_key)
-        update_bucket(by_state, state_key)
-        update_bucket(by_tip_type, tip_type_key)
-        update_bucket(by_track, track_key)
+        update_bucket(by_distance, distance_key, finish_pos)
+        update_bucket(by_price, price_key, finish_pos)
+        update_bucket(by_track_type, track_type_key, finish_pos)
+        update_bucket(by_race_number, race_num_key, finish_pos)
+        update_bucket(by_class, class_key, finish_pos)
+        update_bucket(by_state, state_key, finish_pos)
+        update_bucket(by_tip_type, tip_type_key, finish_pos)
+        update_bucket(by_track, track_key, finish_pos)
+
+    print(f"[TRENDS] Tips with RA results: {tips_with_results}")
+
+    if tips_with_results == 0:
+        return {"error": "No tips with results found", "has_data": False}
 
     # Sort and convert to output format
     def sort_buckets(buckets: Dict[str, TrendBucket], sort_key: str = "win_strike_rate") -> List[Dict]:
         items = list(buckets.values())
-        # Filter out buckets with very few tips (noise)
         items = [b for b in items if b.tips >= 5]
         if sort_key == "win_strike_rate":
             items.sort(key=lambda x: x.win_strike_rate, reverse=True)
@@ -314,7 +356,6 @@ def compute_trends(
             items.sort(key=lambda x: x.label)
         return [b.to_dict() for b in items]
 
-    # Sort race numbers properly
     def sort_race_numbers(buckets: Dict[str, TrendBucket]) -> List[Dict]:
         items = list(buckets.values())
         items = [b for b in items if b.tips >= 5]
@@ -344,7 +385,7 @@ def compute_trends(
         },
 
         "by_distance": sort_buckets(by_distance, "win_strike_rate"),
-        "by_price": sort_buckets(by_price, "label"),  # Sort by price range
+        "by_price": sort_buckets(by_price, "label"),
         "by_track_type": sort_buckets(by_track_type, "win_strike_rate"),
         "by_race_number": sort_race_numbers(by_race_number),
         "by_class": sort_buckets(by_class, "win_strike_rate"),
@@ -352,7 +393,6 @@ def compute_trends(
         "by_tip_type": sort_buckets(by_tip_type, "win_strike_rate"),
         "by_track": sort_buckets(by_track, "win_strike_rate"),
 
-        # Insights - highlight best/worst performers
         "insights": _generate_insights(
             by_distance, by_price, by_track_type,
             by_race_number, by_class, by_state, by_tip_type
@@ -396,7 +436,6 @@ def _generate_insights(
             },
         }
 
-    # Generate insights for each category
     categories = [
         (by_distance, "Distance"),
         (by_price, "Price Range"),
