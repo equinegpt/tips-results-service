@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Reasoning Analysis - What factors predict winners?
+{% endblock %}
+
+{% block body %}
+<main class="page-root">
+
+  <header class="page-header">
+    <div class="page-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            Reasoning Analysis
+          </div>
+          <div class="brand-subtitle">
+            Which tip factors predict winners? · {{ display_range }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-header-right">
+      <form class="date-form" method="get" action="/ui/reasoning">
+        <span class="date-form-label">From</span>
+        <div class="date-form-input-wrap">
+          <input
+            type="date"
+            id="from_date"
+            name="from_date"
+            value="{{ from_date.isoformat() if from_date }}"
+          />
+        </div>
+
+        <span class="date-form-label">To</span>
+        <div class="date-form-input-wrap">
+          <input
+            type="date"
+            id="to_date"
+            name="to_date"
+            value="{{ to_date.isoformat() if to_date }}"
+          />
+        </div>
+
+        <button type="submit" class="btn-go">Apply</button>
+      </form>
+    </div>
+  </header>
+
+  {% if not has_data %}
+    <p class="empty-state">No data found for the selected date range.</p>
+  {% else %}
+
+    {# -------------------- OVERVIEW -------------------- #}
+    <section class="meeting-card meeting-card--summary">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <h2 class="meeting-title">Analysis Summary</h2>
+            <div class="meeting-meta">
+              Analyzing {{ data.total_tips }} tips ({{ data.matched_tips }} with results)
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="meeting-body">
+        <p style="color: #aaa; margin: 0;">
+          This analysis extracts key phrases from tip reasoning and tracks which factors correlate with winning results.
+          Use this to understand which reasoning signals are most predictive.
+        </p>
+      </div>
+    </section>
+
+    {# -------------------- KEY INSIGHTS -------------------- #}
+    {% if data.insights %}
+    <section class="meeting-card">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <h2 class="meeting-title">Key Insights</h2>
+            <div class="meeting-meta">Actionable findings from reasoning analysis</div>
+          </div>
+        </div>
+      </div>
+      <div class="meeting-body">
+        {% for insight in data.insights %}
+          <div style="margin-bottom: 24px; padding: 16px; background: #151820; border-radius: 8px;">
+            <h3 style="margin: 0 0 8px 0; color: #18CB96;">{{ insight.title }}</h3>
+            {% if insight.description %}
+              <p style="color: #aaa; margin: 0 0 12px 0; font-size: 14px;">{{ insight.description }}</p>
+            {% endif %}
+
+            {% if insight.phrases %}
+              <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                {% for p in insight.phrases %}
+                  <div style="background: #0b0c10; padding: 8px 12px; border-radius: 4px;">
+                    <span style="color: #fff; font-weight: 600;">{{ p.phrase.replace('_', ' ').title() }}</span>
+                    <span style="color: {% if p.win_rate > 15 %}#18CB96{% elif p.win_rate < 10 %}#ff6b6b{% else %}#aaa{% endif %}; margin-left: 8px;">
+                      {{ p.win_rate }}% win
+                    </span>
+                    <span style="color: #666; font-size: 12px; margin-left: 4px;">({{ p.tips }} tips)</span>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {% if insight.best %}
+              <div style="display: flex; gap: 24px; margin-top: 8px;">
+                <div>
+                  <span style="color: #18CB96;">Best:</span>
+                  <strong>{{ insight.best.phrase.replace('_', ' ').title() }}</strong>
+                  ({{ insight.best.win_rate }}% win, {{ insight.best.tips }} tips)
+                </div>
+                {% if insight.worst %}
+                <div>
+                  <span style="color: #ff6b6b;">Worst:</span>
+                  <strong>{{ insight.worst.phrase.replace('_', ' ').title() }}</strong>
+                  ({{ insight.worst.win_rate }}% win, {{ insight.worst.tips }} tips)
+                </div>
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {# -------------------- WINNING PHRASES -------------------- #}
+    {% if data.winning_phrases %}
+    <section class="meeting-card">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <h2 class="meeting-title">Top Performing Reasoning Factors</h2>
+            <div class="meeting-meta">Phrases in tip reasoning with highest win rates</div>
+          </div>
+        </div>
+      </div>
+      <div class="meeting-body">
+        <table class="race-table">
+          <thead>
+            <tr>
+              <th>Phrase</th>
+              <th style="text-align:right">Tips</th>
+              <th style="text-align:right">Wins</th>
+              <th style="text-align:right">2nds</th>
+              <th style="text-align:right">3rds</th>
+              <th style="text-align:right">Win %</th>
+              <th style="text-align:right">Place %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in data.winning_phrases %}
+            <tr>
+              <td><strong>{{ p.phrase.replace('_', ' ').title() }}</strong></td>
+              <td style="text-align:right">{{ p.tips }}</td>
+              <td style="text-align:right">{{ p.wins }}</td>
+              <td style="text-align:right">{{ p.seconds }}</td>
+              <td style="text-align:right">{{ p.thirds }}</td>
+              <td style="text-align:right; color: #18CB96; font-weight: 600;">{{ p.win_rate }}%</td>
+              <td style="text-align:right">{{ p.place_rate }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {# -------------------- UNDERPERFORMING PHRASES -------------------- #}
+    {% if data.losing_phrases %}
+    <section class="meeting-card">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <h2 class="meeting-title">Underperforming Reasoning Factors</h2>
+            <div class="meeting-meta">Phrases with lower win rates - potential areas to refine</div>
+          </div>
+        </div>
+      </div>
+      <div class="meeting-body">
+        <table class="race-table">
+          <thead>
+            <tr>
+              <th>Phrase</th>
+              <th style="text-align:right">Tips</th>
+              <th style="text-align:right">Wins</th>
+              <th style="text-align:right">2nds</th>
+              <th style="text-align:right">3rds</th>
+              <th style="text-align:right">Win %</th>
+              <th style="text-align:right">Place %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in data.losing_phrases %}
+            <tr>
+              <td><strong>{{ p.phrase.replace('_', ' ').title() }}</strong></td>
+              <td style="text-align:right">{{ p.tips }}</td>
+              <td style="text-align:right">{{ p.wins }}</td>
+              <td style="text-align:right">{{ p.seconds }}</td>
+              <td style="text-align:right">{{ p.thirds }}</td>
+              <td style="text-align:right; color: #ff6b6b;">{{ p.win_rate }}%</td>
+              <td style="text-align:right">{{ p.place_rate }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {# -------------------- ALL PHRASES -------------------- #}
+    {% if data.all_phrases %}
+    <section class="meeting-card">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <h2 class="meeting-title">All Reasoning Factors</h2>
+            <div class="meeting-meta">Complete breakdown of all tracked reasoning phrases</div>
+          </div>
+        </div>
+      </div>
+      <div class="meeting-body">
+        <table class="race-table">
+          <thead>
+            <tr>
+              <th>Phrase</th>
+              <th style="text-align:right">Tips</th>
+              <th style="text-align:right">Wins</th>
+              <th style="text-align:right">2nds</th>
+              <th style="text-align:right">3rds</th>
+              <th style="text-align:right">Win %</th>
+              <th style="text-align:right">Place %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in data.all_phrases %}
+            <tr>
+              <td><strong>{{ p.phrase.replace('_', ' ').title() }}</strong></td>
+              <td style="text-align:right">{{ p.tips }}</td>
+              <td style="text-align:right">{{ p.wins }}</td>
+              <td style="text-align:right">{{ p.seconds }}</td>
+              <td style="text-align:right">{{ p.thirds }}</td>
+              <td style="text-align:right; color: {% if p.win_rate > 15 %}#18CB96{% elif p.win_rate < 10 %}#ff6b6b{% else %}#fff{% endif %};">
+                {{ p.win_rate }}%
+              </td>
+              <td style="text-align:right">{{ p.place_rate }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {# -------------------- BY TIP TYPE -------------------- #}
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+      {% if data.ai_best_phrases %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <h2 class="meeting-title">AI_BEST Tips</h2>
+              <div class="meeting-meta">Best reasoning factors</div>
+            </div>
+          </div>
+        </div>
+        <div class="meeting-body">
+          {% for p in data.ai_best_phrases[:5] %}
+          <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333;">
+            <span>{{ p.phrase.replace('_', ' ').title() }}</span>
+            <span style="color: #18CB96;">{{ p.win_rate }}% ({{ p.tips }})</span>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if data.danger_phrases %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <h2 class="meeting-title">DANGER Tips</h2>
+              <div class="meeting-meta">Best reasoning factors</div>
+            </div>
+          </div>
+        </div>
+        <div class="meeting-body">
+          {% for p in data.danger_phrases[:5] %}
+          <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333;">
+            <span>{{ p.phrase.replace('_', ' ').title() }}</span>
+            <span style="color: #18CB96;">{{ p.win_rate }}% ({{ p.tips }})</span>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if data.value_phrases %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <h2 class="meeting-title">VALUE Tips</h2>
+              <div class="meeting-meta">Best reasoning factors</div>
+            </div>
+          </div>
+        </div>
+        <div class="meeting-body">
+          {% for p in data.value_phrases[:5] %}
+          <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333;">
+            <span>{{ p.phrase.replace('_', ' ').title() }}</span>
+            <span style="color: #18CB96;">{{ p.win_rate }}% ({{ p.tips }})</span>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    </div>
+
+  {% endif %}
+</main>
+{% endblock %}
