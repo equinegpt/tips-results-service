@@ -1,28 +1,23 @@
 # app/trends_analytics.py
 """
-Deep analytics for identifying winning trends across various dimensions:
-- Distance ranges
-- Price points (SP)
-- Track types (Metro/Provincial/Country)
-- Race numbers
-- Race classes (Maiden, etc.)
-- States
-- Tip types
+Trend analytics built fresh from two data sources:
+- Tips: https://tips-results-service.onrender.com/tips?date=YYYY-MM-DD
+- Results: https://ra-crawler.onrender.com/results?date=YYYY-MM-DD
 
-Uses RA Crawler results as primary source (same as Overview page).
+Matching key: (date, state, race_number, tab_number/horse_number)
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
+import httpx
 from sqlalchemy.orm import Session
 
 from . import models
-from .ra_results_client import RAResultsClient
-from .daily_generator import _tracks_match
 
 
 @dataclass
@@ -62,6 +57,151 @@ class TrendBucket:
         }
 
 
+@dataclass
+class FlatTip:
+    """Flattened tip with all context needed for trend analysis"""
+    meeting_date: date
+    state: str
+    track_name: str
+    race_number: int
+    tab_number: int
+    horse_name: str
+    tip_type: str
+    distance_m: Optional[int]
+    class_text: Optional[str]
+    race_name: Optional[str]
+
+
+@dataclass
+class FlatResult:
+    """Flattened result from RA Crawler"""
+    meeting_date: date
+    state: str
+    track: str
+    race_no: int
+    horse_number: int
+    horse_name: str
+    finishing_pos: Optional[int]
+    is_scratched: bool
+    starting_price: Optional[float]
+
+
+def _fetch_tips_for_date(d: date) -> List[FlatTip]:
+    """
+    Fetch tips from Tips Service API for a single date.
+    GET /tips?date=YYYY-MM-DD
+    """
+    base_url = os.getenv("TIPS_SERVICE_BASE_URL", "https://tips-results-service.onrender.com")
+    url = f"{base_url.rstrip('/')}/tips"
+
+    tips: List[FlatTip] = []
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url, params={"date": d.isoformat()})
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Data structure: list of {meeting: {...}, races: [{race: {...}, tips: [...]}]}
+            for meeting_obj in data:
+                meeting = meeting_obj.get("meeting", {})
+                meeting_date = d
+                state = (meeting.get("state") or "").upper()
+                track_name = meeting.get("track_name") or ""
+
+                for race_obj in meeting_obj.get("races", []):
+                    race = race_obj.get("race", {})
+                    race_number = race.get("race_number")
+                    distance_m = race.get("distance_m")
+                    class_text = race.get("class_text")
+                    race_name = race.get("name")
+
+                    if race_number is None:
+                        continue
+
+                    for tip in race_obj.get("tips", []):
+                        tab_number = tip.get("tab_number")
+                        if tab_number is None:
+                            continue
+
+                        tips.append(FlatTip(
+                            meeting_date=meeting_date,
+                            state=state,
+                            track_name=track_name,
+                            race_number=int(race_number),
+                            tab_number=int(tab_number),
+                            horse_name=tip.get("horse_name") or f"#{tab_number}",
+                            tip_type=tip.get("tip_type") or "UNKNOWN",
+                            distance_m=distance_m,
+                            class_text=class_text,
+                            race_name=race_name,
+                        ))
+    except Exception as e:
+        print(f"[TRENDS] Error fetching tips for {d}: {e}")
+
+    return tips
+
+
+def _fetch_results_for_date(d: date) -> List[FlatResult]:
+    """
+    Fetch results from RA Crawler API for a single date.
+    GET /results?date=YYYY-MM-DD
+    """
+    base_url = os.getenv("RA_CRAWLER_BASE_URL", "https://ra-crawler.onrender.com")
+    url = f"{base_url.rstrip('/')}/results"
+
+    results: List[FlatResult] = []
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url, params={"date": d.isoformat()})
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Data structure: list of result objects
+            for item in data:
+                state = (item.get("state") or "").upper()
+                track = item.get("track") or ""
+                race_no = item.get("race_no")
+                horse_number = item.get("horse_number")
+
+                if not state or race_no is None or horse_number is None:
+                    continue
+
+                results.append(FlatResult(
+                    meeting_date=d,
+                    state=state,
+                    track=track,
+                    race_no=int(race_no),
+                    horse_number=int(horse_number),
+                    horse_name=item.get("horse_name") or f"#{horse_number}",
+                    finishing_pos=item.get("finishing_pos"),
+                    is_scratched=bool(item.get("is_scratched")),
+                    starting_price=item.get("starting_price"),
+                ))
+    except Exception as e:
+        print(f"[TRENDS] Error fetching results for {d}: {e}")
+
+    return results
+
+
+def _build_results_index(results: List[FlatResult]) -> Dict[Tuple[date, str, int, int], FlatResult]:
+    """
+    Build lookup index for results.
+    Key: (date, STATE, race_no, horse_number)
+
+    If there are multiple results for same key (shouldn't happen), keep the first.
+    """
+    index: Dict[Tuple[date, str, int, int], FlatResult] = {}
+
+    for r in results:
+        key = (r.meeting_date, r.state, r.race_no, r.horse_number)
+        if key not in index:
+            index[key] = r
+
+    return index
+
+
 def _get_distance_bucket(distance_m: Optional[int]) -> str:
     """Categorize distance into buckets"""
     if distance_m is None:
@@ -84,33 +224,30 @@ def _get_distance_bucket(distance_m: Optional[int]) -> str:
         return "Stayer (2400m+)"
 
 
-def _get_price_bucket(sp: Optional[Decimal]) -> str:
+def _get_price_bucket(sp: Optional[float]) -> str:
     """Categorize starting price into buckets"""
     if sp is None:
         return "Unknown"
-    price = float(sp)
-    if price < 2.0:
+    if sp < 2.0:
         return "$1.01-$1.99 (Hot Fav)"
-    elif price < 3.0:
+    elif sp < 3.0:
         return "$2.00-$2.99 (Fav)"
-    elif price < 4.0:
+    elif sp < 4.0:
         return "$3.00-$3.99"
-    elif price < 6.0:
+    elif sp < 6.0:
         return "$4.00-$5.99"
-    elif price < 10.0:
+    elif sp < 10.0:
         return "$6.00-$9.99"
-    elif price < 15.0:
+    elif sp < 15.0:
         return "$10.00-$14.99"
-    elif price < 21.0:
+    elif sp < 21.0:
         return "$15.00-$20.99"
     else:
         return "$21.00+ (Roughie)"
 
 
 def _get_track_type(track_name: str) -> str:
-    """
-    Determine track type based on track name.
-    """
+    """Determine track type based on track name."""
     metro_tracks = {
         "flemington", "caulfield", "moonee valley", "sandown",
         "randwick", "royal randwick", "rosehill", "warwick farm", "canterbury",
@@ -172,55 +309,19 @@ def _get_class_bucket(class_text: Optional[str], race_name: Optional[str]) -> st
         return "Other"
 
 
-def _build_ra_results_index(
-    date_from: date,
-    date_to: date,
-) -> Dict[Tuple[date, str, int, int], List[Any]]:
-    """
-    Build index over RA Crawler results for the date window.
-    Key: (meeting_date, STATE, race_no, tab_number) -> list[RAResultRow]
-
-    Same approach as routes_ui_overview.py uses.
-    """
-    runner_index: Dict[Tuple[date, str, int, int], List[Any]] = {}
-
-    client = RAResultsClient()
-    try:
-        day = date_from
-        while day <= date_to:
-            try:
-                rows = client.fetch_results_for_date(day)
-                print(f"[TRENDS] RA rows for {day}: {len(rows)}")
-            except Exception as e:
-                print(f"[TRENDS] error fetching RA rows for {day}: {e}")
-                rows = []
-
-            for r in rows:
-                k_runner = (
-                    r.meeting_date,
-                    (r.state or "").upper(),
-                    r.race_no,
-                    r.tab_number,
-                )
-                runner_index.setdefault(k_runner, []).append(r)
-
-            day += timedelta(days=1)
-    finally:
-        client.close()
-
-    total_runner = sum(len(v) for v in runner_index.values())
-    print(f"[TRENDS] RA runner_index total rows = {total_runner}")
-    return runner_index
-
-
 def compute_trends(
-    db: Session,
+    db: Session,  # Not used anymore but keeping for API compatibility
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
     Compute comprehensive trend analysis across all dimensions.
-    Uses RA Crawler results as primary source (same as Overview page).
+
+    Fetches data directly from:
+    - Tips API: /tips?date=YYYY-MM-DD
+    - RA Crawler: /results?date=YYYY-MM-DD
+
+    Matches tips to results using: (date, state, race_number, tab_number)
     """
     # Default to last 60 days
     if date_to is None:
@@ -228,29 +329,42 @@ def compute_trends(
     if date_from is None:
         date_from = date_to - timedelta(days=60)
 
-    # 1) Build RA results index for the window (same as Overview)
-    ra_index = _build_ra_results_index(date_from, date_to)
+    print(f"[TRENDS] Computing trends from {date_from} to {date_to}")
 
-    # 2) Fetch all tips in that window
-    rows = (
-        db.query(models.Tip, models.Race, models.Meeting)
-        .join(models.Race, models.Tip.race_id == models.Race.id)
-        .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
-        .filter(models.Meeting.date >= date_from)
-        .filter(models.Meeting.date <= date_to)
-        .all()
-    )
+    # 1) Fetch all tips and results for the date range
+    all_tips: List[FlatTip] = []
+    all_results: List[FlatResult] = []
 
-    if not rows:
+    day = date_from
+    while day <= date_to:
+        tips = _fetch_tips_for_date(day)
+        results = _fetch_results_for_date(day)
+
+        print(f"[TRENDS] {day}: {len(tips)} tips, {len(results)} results")
+
+        all_tips.extend(tips)
+        all_results.extend(results)
+        day += timedelta(days=1)
+
+    print(f"[TRENDS] Total: {len(all_tips)} tips, {len(all_results)} results")
+
+    if not all_tips:
         return {"error": "No tips found", "has_data": False}
 
-    print(f"[TRENDS] Tips in window {date_from} -> {date_to}: {len(rows)}")
+    # 2) Build results index for fast lookup
+    results_index = _build_results_index(all_results)
+    print(f"[TRENDS] Results index has {len(results_index)} entries")
 
-    # Debug: sample some keys from the RA index
-    sample_ra_keys = list(ra_index.keys())[:5]
-    print(f"[TRENDS] Sample RA index keys: {sample_ra_keys}")
+    # Debug: show sample keys from both
+    sample_tip_keys = []
+    for t in all_tips[:5]:
+        sample_tip_keys.append((t.meeting_date, t.state, t.race_number, t.tab_number))
+    print(f"[TRENDS] Sample tip keys: {sample_tip_keys}")
 
-    # Initialize buckets for each dimension
+    sample_result_keys = list(results_index.keys())[:5]
+    print(f"[TRENDS] Sample result keys: {sample_result_keys}")
+
+    # 3) Initialize buckets for each dimension
     by_distance: Dict[str, TrendBucket] = {}
     by_price: Dict[str, TrendBucket] = {}
     by_track_type: Dict[str, TrendBucket] = {}
@@ -260,86 +374,54 @@ def compute_trends(
     by_tip_type: Dict[str, TrendBucket] = {}
     by_track: Dict[str, TrendBucket] = {}
 
-    tips_with_results = 0
-    total_tips_counted = 0
-    missed_lookups = 0
-    first_few_misses = []
+    total_tips = 0
+    matched_tips = 0
+    scratched_tips = 0
 
-    # Process each tip (count ALL tips like Overview does)
-    for tip, race, meeting in rows:
-        # Look up RA result for this tip (same matching as Overview)
-        ra_key = (
-            meeting.date,
-            (meeting.state or "").upper(),
-            race.race_number,
-            tip.tab_number,
-        )
-        candidates = ra_index.get(ra_key) or []
+    # 4) Process each tip
+    for tip in all_tips:
+        # Build lookup key: (date, state, race_number, tab_number)
+        lookup_key = (tip.meeting_date, tip.state, tip.race_number, tip.tab_number)
 
-        # Track misses for debugging
-        if not candidates:
-            missed_lookups += 1
-            if len(first_few_misses) < 10:
-                first_few_misses.append({
-                    "key": ra_key,
-                    "track": meeting.track_name,
-                    "horse": tip.horse_name if hasattr(tip, 'horse_name') else f"tab#{tip.tab_number}"
-                })
+        # Find matching result
+        result = results_index.get(lookup_key)
 
-        # Find matching RA row (with fuzzy track matching if multiple)
-        ra_row = None
-        if candidates:
-            mt_track = meeting.track_name or ""
-            if len(candidates) == 1:
-                ra_row = candidates[0]
-            else:
-                for cand in candidates:
-                    try:
-                        if _tracks_match(mt_track, getattr(cand, "track", "") or ""):
-                            ra_row = cand
-                            break
-                    except Exception:
-                        pass
-                if ra_row is None:
-                    ra_row = candidates[0]
-
-        # Determine finish position and SP from RA results (if available)
+        # Determine outcome
         finish_pos: Optional[int] = None
-        sp: Any = None
+        sp: Optional[float] = None
         is_scratched = False
 
-        if ra_row is not None:
-            is_scratched = getattr(ra_row, "is_scratched", False)
+        if result:
+            matched_tips += 1
+            is_scratched = result.is_scratched
             if not is_scratched:
-                finish_pos = getattr(ra_row, "finishing_pos", None)
-                sp = getattr(ra_row, "starting_price", None)
-                if finish_pos is not None:
-                    tips_with_results += 1
+                finish_pos = result.finishing_pos
+                sp = result.starting_price
 
-        # Skip scratched runners (don't count them at all)
+        # Skip scratched runners
         if is_scratched:
+            scratched_tips += 1
             continue
 
-        total_tips_counted += 1
+        total_tips += 1
 
         # Determine bucket keys
-        distance_key = _get_distance_bucket(race.distance_m)
-        price_key = _get_price_bucket(Decimal(str(sp)) if sp else None)
-        track_type_key = _get_track_type(meeting.track_name)
-        race_num_key = f"Race {race.race_number}"
-        class_key = _get_class_bucket(race.class_text, race.name)
-        state_key = meeting.state or "Unknown"
+        distance_key = _get_distance_bucket(tip.distance_m)
+        price_key = _get_price_bucket(sp)
+        track_type_key = _get_track_type(tip.track_name)
+        race_num_key = f"Race {tip.race_number}"
+        class_key = _get_class_bucket(tip.class_text, tip.race_name)
+        state_key = tip.state or "Unknown"
         tip_type_key = tip.tip_type
-        track_key = f"{meeting.track_name} ({meeting.state})"
+        track_key = f"{tip.track_name} ({tip.state})"
 
-        # Helper to update a bucket - counts all tips, only records positions for resolved tips
+        # Helper to update a bucket
         def update_bucket(buckets: Dict[str, TrendBucket], key: str, pos: Optional[int]):
             if key not in buckets:
                 buckets[key] = TrendBucket(label=key)
             bucket = buckets[key]
             bucket.tips += 1
 
-            # Only record position if we have a result
             if pos is not None:
                 if pos == 1:
                     bucket.wins += 1
@@ -358,16 +440,12 @@ def compute_trends(
         update_bucket(by_tip_type, tip_type_key, finish_pos)
         update_bucket(by_track, track_key, finish_pos)
 
-    print(f"[TRENDS] Total tips counted: {total_tips_counted}")
-    print(f"[TRENDS] Tips with RA results: {tips_with_results}")
-    print(f"[TRENDS] Missed RA lookups: {missed_lookups}")
-    if first_few_misses:
-        print(f"[TRENDS] First few misses: {first_few_misses}")
+    print(f"[TRENDS] Processed: {total_tips} tips (matched: {matched_tips}, scratched: {scratched_tips})")
 
-    if total_tips_counted == 0:
-        return {"error": "No tips found", "has_data": False}
+    if total_tips == 0:
+        return {"error": "No tips found after filtering", "has_data": False}
 
-    # Sort and convert to output format
+    # 5) Sort and convert to output format
     def sort_buckets(buckets: Dict[str, TrendBucket], sort_key: str = "win_strike_rate") -> List[Dict]:
         items = list(buckets.values())
         items = [b for b in items if b.tips >= 5]
@@ -388,11 +466,11 @@ def compute_trends(
         return [b.to_dict() for b in items]
 
     # Calculate overall stats
-    total_tips = sum(b.tips for b in by_tip_type.values())
-    total_wins = sum(b.wins for b in by_tip_type.values())
-    total_seconds = sum(b.seconds for b in by_tip_type.values())
-    total_thirds = sum(b.thirds for b in by_tip_type.values())
-    total_podium = total_wins + total_seconds + total_thirds
+    overall_tips = sum(b.tips for b in by_tip_type.values())
+    overall_wins = sum(b.wins for b in by_tip_type.values())
+    overall_seconds = sum(b.seconds for b in by_tip_type.values())
+    overall_thirds = sum(b.thirds for b in by_tip_type.values())
+    overall_podium = overall_wins + overall_seconds + overall_thirds
 
     return {
         "has_data": True,
@@ -400,13 +478,13 @@ def compute_trends(
         "date_to": date_to.isoformat() if date_to else None,
 
         "overall": {
-            "tips": total_tips,
-            "wins": total_wins,
-            "seconds": total_seconds,
-            "thirds": total_thirds,
-            "podium": total_podium,
-            "win_strike_rate": round(total_wins / total_tips * 100, 1) if total_tips > 0 else 0,
-            "place_strike_rate": round(total_podium / total_tips * 100, 1) if total_tips > 0 else 0,
+            "tips": overall_tips,
+            "wins": overall_wins,
+            "seconds": overall_seconds,
+            "thirds": overall_thirds,
+            "podium": overall_podium,
+            "win_strike_rate": round(overall_wins / overall_tips * 100, 1) if overall_tips > 0 else 0,
+            "place_strike_rate": round(overall_podium / overall_tips * 100, 1) if overall_tips > 0 else 0,
         },
 
         "by_distance": sort_buckets(by_distance, "win_strike_rate"),
