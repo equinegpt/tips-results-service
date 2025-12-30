@@ -3,17 +3,42 @@
 Phase 2 Analytics: Analyze which reasoning phrases correlate with winning tips.
 
 Extracts key phrases from tip reasoning and tracks their win/place rates.
+
+Uses same caching approach as trends_analytics.py for consistency.
 """
 from __future__ import annotations
 
 import os
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
+
+
+# ============================================================================
+# CACHING LAYER - shared TTL with trends_analytics
+# ============================================================================
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+_reasoning_tips_cache: Dict[date, Tuple[float, List[Dict[str, Any]]]] = {}
+_reasoning_results_cache: Dict[date, Tuple[float, Dict]] = {}
+
+
+def _is_cache_valid(timestamp: float) -> bool:
+    """Check if cached data is still valid"""
+    return (time.time() - timestamp) < _CACHE_TTL_SECONDS
+
+
+def clear_reasoning_cache():
+    """Clear all cached data"""
+    global _reasoning_tips_cache, _reasoning_results_cache
+    _reasoning_tips_cache.clear()
+    _reasoning_results_cache.clear()
+    print("[REASONING] Cache cleared")
 
 
 @dataclass
@@ -117,18 +142,28 @@ def _extract_phrases(reasoning: str) -> Set[str]:
     return found
 
 
-def _fetch_tips_for_date(d: date) -> List[Dict[str, Any]]:
-    """Fetch tips with full details including reasoning"""
+def _fetch_tips_for_date(d: date, use_cache: bool = True) -> List[Dict[str, Any]]:
+    """Fetch tips with full details including reasoning. Includes retry logic."""
+    global _reasoning_tips_cache
+
+    # Check cache first
+    if use_cache and d in _reasoning_tips_cache:
+        timestamp, cached_tips = _reasoning_tips_cache[d]
+        if _is_cache_valid(timestamp):
+            return cached_tips
+
     base_url = os.getenv("TIPS_SERVICE_BASE_URL", "https://tips-results-service.onrender.com")
     url = f"{base_url.rstrip('/')}/tips"
 
     tips = []
+    max_retries = 3
 
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(url, params={"date": d.isoformat()})
-            resp.raise_for_status()
-            data = resp.json()
+    for attempt in range(max_retries):
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.get(url, params={"date": d.isoformat()})
+                resp.raise_for_status()
+                data = resp.json()
 
             for meeting_obj in data:
                 meeting = meeting_obj.get("meeting", {})
@@ -157,24 +192,43 @@ def _fetch_tips_for_date(d: date) -> List[Dict[str, Any]]:
                             "tip_type": tip.get("tip_type") or "UNKNOWN",
                             "reasoning": tip.get("reasoning") or "",
                         })
-    except Exception as e:
-        print(f"[REASONING] Error fetching tips for {d}: {e}")
+
+            # Success - cache and return
+            _reasoning_tips_cache[d] = (time.time(), tips)
+            return tips
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[REASONING] Retry {attempt + 1}/{max_retries} for tips {d}: {e}")
+                time.sleep(2 ** attempt)
+            else:
+                print(f"[REASONING] Failed fetching tips for {d} after {max_retries} attempts: {e}")
 
     return tips
 
 
-def _fetch_results_for_date(d: date) -> Dict[Tuple[str, int, int], Dict[str, Any]]:
-    """Fetch results and return as lookup dict keyed by (state, race_no, horse_number)"""
+def _fetch_results_for_date(d: date, use_cache: bool = True) -> Dict[Tuple[str, int, int], Dict[str, Any]]:
+    """Fetch results and return as lookup dict keyed by (state, race_no, horse_number). Includes retry logic."""
+    global _reasoning_results_cache
+
+    # Check cache first
+    if use_cache and d in _reasoning_results_cache:
+        timestamp, cached_results = _reasoning_results_cache[d]
+        if _is_cache_valid(timestamp):
+            return cached_results
+
     base_url = os.getenv("RA_CRAWLER_BASE_URL", "https://ra-crawler.onrender.com")
     url = f"{base_url.rstrip('/')}/results"
 
     results = {}
+    max_retries = 3
 
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(url, params={"date": d.isoformat()})
-            resp.raise_for_status()
-            data = resp.json()
+    for attempt in range(max_retries):
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.get(url, params={"date": d.isoformat()})
+                resp.raise_for_status()
+                data = resp.json()
 
             for item in data:
                 state = (item.get("state") or "").upper()
@@ -190,8 +244,17 @@ def _fetch_results_for_date(d: date) -> Dict[Tuple[str, int, int], Dict[str, Any
                     "is_scratched": bool(item.get("is_scratched")),
                     "starting_price": item.get("starting_price"),
                 }
-    except Exception as e:
-        print(f"[REASONING] Error fetching results for {d}: {e}")
+
+            # Success - cache and return
+            _reasoning_results_cache[d] = (time.time(), results)
+            return results
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[REASONING] Retry {attempt + 1}/{max_retries} for results {d}: {e}")
+                time.sleep(2 ** attempt)
+            else:
+                print(f"[REASONING] Failed fetching results for {d} after {max_retries} attempts: {e}")
 
     return results
 

@@ -5,10 +5,14 @@ Trend analytics built fresh from two data sources:
 - Results: https://ra-crawler.onrender.com/results?date=YYYY-MM-DD
 
 Matching key: (date, state, race_number, tab_number/horse_number)
+
+Uses in-memory caching to ensure data consistency within analysis runs
+and to avoid hammering external APIs on every page load.
 """
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -18,6 +22,30 @@ import httpx
 from sqlalchemy.orm import Session
 
 from . import models
+
+
+# ============================================================================
+# CACHING LAYER
+# Cache fetched data for 5 minutes to ensure consistency within analysis runs
+# and avoid re-fetching on every page load.
+# ============================================================================
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+_tips_cache: Dict[date, Tuple[float, List["FlatTip"]]] = {}  # date -> (timestamp, tips)
+_results_cache: Dict[date, Tuple[float, List["FlatResult"]]] = {}  # date -> (timestamp, results)
+
+
+def _is_cache_valid(timestamp: float) -> bool:
+    """Check if cached data is still valid"""
+    return (time.time() - timestamp) < _CACHE_TTL_SECONDS
+
+
+def clear_trends_cache():
+    """Clear all cached data - useful for testing or forcing refresh"""
+    global _tips_cache, _results_cache
+    _tips_cache.clear()
+    _results_cache.clear()
+    print("[TRENDS] Cache cleared")
 
 
 @dataclass
@@ -86,21 +114,35 @@ class FlatResult:
     starting_price: Optional[float]
 
 
-def _fetch_tips_for_date(d: date) -> List[FlatTip]:
+def _fetch_tips_for_date(d: date, use_cache: bool = True) -> List[FlatTip]:
     """
     Fetch tips from Tips Service API for a single date.
     GET /tips?date=YYYY-MM-DD
+
+    Uses caching to ensure consistency and reduce API calls.
+    Includes retry logic for reliability.
     """
+    global _tips_cache
+
+    # Check cache first
+    if use_cache and d in _tips_cache:
+        timestamp, cached_tips = _tips_cache[d]
+        if _is_cache_valid(timestamp):
+            return cached_tips
+
     base_url = os.getenv("TIPS_SERVICE_BASE_URL", "https://tips-results-service.onrender.com")
     url = f"{base_url.rstrip('/')}/tips"
 
     tips: List[FlatTip] = []
+    max_retries = 3
+    last_error = None
 
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(url, params={"date": d.isoformat()})
-            resp.raise_for_status()
-            data = resp.json()
+    for attempt in range(max_retries):
+        try:
+            with httpx.Client(timeout=60.0) as client:  # Increased timeout from 30s
+                resp = client.get(url, params={"date": d.isoformat()})
+                resp.raise_for_status()
+                data = resp.json()
 
             # Data structure: list of {meeting: {...}, races: [{race: {...}, tips: [...]}]}
             for meeting_obj in data:
@@ -136,27 +178,50 @@ def _fetch_tips_for_date(d: date) -> List[FlatTip]:
                             class_text=class_text,
                             race_name=race_name,
                         ))
-    except Exception as e:
-        print(f"[TRENDS] Error fetching tips for {d}: {e}")
 
-    return tips
+            # Success - cache and return
+            _tips_cache[d] = (time.time(), tips)
+            return tips
+
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                print(f"[TRENDS] Retry {attempt + 1}/{max_retries} for tips {d}: {e}")
+                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+            else:
+                print(f"[TRENDS] Failed fetching tips for {d} after {max_retries} attempts: {e}")
+
+    return tips  # Return empty list if all retries failed
 
 
-def _fetch_results_for_date(d: date) -> List[FlatResult]:
+def _fetch_results_for_date(d: date, use_cache: bool = True) -> List[FlatResult]:
     """
     Fetch results from RA Crawler API for a single date.
     GET /results?date=YYYY-MM-DD
+
+    Uses caching to ensure consistency and reduce API calls.
+    Includes retry logic for reliability.
     """
+    global _results_cache
+
+    # Check cache first
+    if use_cache and d in _results_cache:
+        timestamp, cached_results = _results_cache[d]
+        if _is_cache_valid(timestamp):
+            return cached_results
+
     base_url = os.getenv("RA_CRAWLER_BASE_URL", "https://ra-crawler.onrender.com")
     url = f"{base_url.rstrip('/')}/results"
 
     results: List[FlatResult] = []
+    max_retries = 3
 
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(url, params={"date": d.isoformat()})
-            resp.raise_for_status()
-            data = resp.json()
+    for attempt in range(max_retries):
+        try:
+            with httpx.Client(timeout=60.0) as client:  # Increased timeout from 30s
+                resp = client.get(url, params={"date": d.isoformat()})
+                resp.raise_for_status()
+                data = resp.json()
 
             # Data structure: list of result objects
             for item in data:
@@ -179,10 +244,19 @@ def _fetch_results_for_date(d: date) -> List[FlatResult]:
                     is_scratched=bool(item.get("is_scratched")),
                     starting_price=item.get("starting_price"),
                 ))
-    except Exception as e:
-        print(f"[TRENDS] Error fetching results for {d}: {e}")
 
-    return results
+            # Success - cache and return
+            _results_cache[d] = (time.time(), results)
+            return results
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[TRENDS] Retry {attempt + 1}/{max_retries} for results {d}: {e}")
+                time.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                print(f"[TRENDS] Failed fetching results for {d} after {max_retries} attempts: {e}")
+
+    return results  # Return empty list if all retries failed
 
 
 def _build_results_index(results: List[FlatResult]) -> Dict[Tuple[date, str, int, int], FlatResult]:
@@ -331,20 +405,35 @@ def compute_trends(
 
     print(f"[TRENDS] Computing trends from {date_from} to {date_to}")
 
+    # Track cache stats for debugging
+    cache_hits = 0
+    cache_misses = 0
+
     # 1) Fetch all tips and results for the date range
     all_tips: List[FlatTip] = []
     all_results: List[FlatResult] = []
 
     day = date_from
     while day <= date_to:
+        # Check if we'll hit cache
+        tips_cached = day in _tips_cache and _is_cache_valid(_tips_cache[day][0])
+        results_cached = day in _results_cache and _is_cache_valid(_results_cache[day][0])
+
         tips = _fetch_tips_for_date(day)
         results = _fetch_results_for_date(day)
 
-        print(f"[TRENDS] {day}: {len(tips)} tips, {len(results)} results")
+        if tips_cached:
+            cache_hits += 1
+        else:
+            cache_misses += 1
+
+        print(f"[TRENDS] {day}: {len(tips)} tips, {len(results)} results {'(cached)' if tips_cached else '(fetched)'}")
 
         all_tips.extend(tips)
         all_results.extend(results)
         day += timedelta(days=1)
+
+    print(f"[TRENDS] Cache stats: {cache_hits} hits, {cache_misses} misses")
 
     print(f"[TRENDS] Total: {len(all_tips)} tips, {len(all_results)} results")
 
