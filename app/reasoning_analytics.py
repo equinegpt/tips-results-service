@@ -97,7 +97,7 @@ REASONING_PHRASES = {
     # Specific metrics mentioned
     "lengths_faster": ["lengths faster", "lengths vs avg", "lengths better"],
     "pfai_score": ["pfai", "pf ai"],
-]
+}
 
 
 def _extract_phrases(reasoning: str) -> Set[str]:
