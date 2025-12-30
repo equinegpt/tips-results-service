@@ -31,8 +31,6 @@ class TrendBucket:
     wins: int = 0
     seconds: int = 0
     thirds: int = 0
-    total_staked: Decimal = field(default_factory=lambda: Decimal("0"))
-    total_return: Decimal = field(default_factory=lambda: Decimal("0"))
 
     @property
     def win_strike_rate(self) -> float:
@@ -40,18 +38,14 @@ class TrendBucket:
 
     @property
     def place_strike_rate(self) -> float:
+        """Top 3 finish rate"""
         places = self.wins + self.seconds + self.thirds
         return (places / self.tips * 100) if self.tips > 0 else 0.0
 
     @property
-    def roi(self) -> float:
-        if self.total_staked > 0:
-            return float((self.total_return - self.total_staked) / self.total_staked * 100)
-        return 0.0
-
-    @property
-    def profit(self) -> float:
-        return float(self.total_return - self.total_staked)
+    def podium_total(self) -> int:
+        """Total 1st + 2nd + 3rd finishes"""
+        return self.wins + self.seconds + self.thirds
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,11 +54,9 @@ class TrendBucket:
             "wins": self.wins,
             "seconds": self.seconds,
             "thirds": self.thirds,
+            "podium": self.podium_total,
             "win_strike_rate": round(self.win_strike_rate, 1),
             "place_strike_rate": round(self.place_strike_rate, 1),
-            "roi": round(self.roi, 1),
-            "profit": round(self.profit, 2),
-            "total_staked": float(self.total_staked),
         }
 
 
@@ -200,13 +192,11 @@ def compute_trends(
     db: Session,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
-    stake_per_tip: float = 10.0,
 ) -> Dict[str, Any]:
     """
     Compute comprehensive trend analysis across all dimensions.
     Returns data suitable for dashboard visualization.
     """
-    stake_dec = _safe_decimal(stake_per_tip)
 
     # Build base query with all necessary joins
     q = (
@@ -283,12 +273,9 @@ def compute_trends(
                 buckets[key] = TrendBucket(label=key)
             bucket = buckets[key]
             bucket.tips += 1
-            bucket.total_staked += stake_dec
 
             if finish_pos == 1:
                 bucket.wins += 1
-                if sp:
-                    bucket.total_return += stake_dec * _safe_decimal(sp)
             elif finish_pos == 2:
                 bucket.seconds += 1
             elif finish_pos == 3:
@@ -305,14 +292,14 @@ def compute_trends(
         update_bucket(by_track, track_key)
 
     # Sort and convert to output format
-    def sort_buckets(buckets: Dict[str, TrendBucket], sort_key: str = "roi") -> List[Dict]:
+    def sort_buckets(buckets: Dict[str, TrendBucket], sort_key: str = "win_strike_rate") -> List[Dict]:
         items = list(buckets.values())
         # Filter out buckets with very few tips (noise)
         items = [b for b in items if b.tips >= 5]
-        if sort_key == "roi":
-            items.sort(key=lambda x: x.roi, reverse=True)
-        elif sort_key == "win_strike_rate":
+        if sort_key == "win_strike_rate":
             items.sort(key=lambda x: x.win_strike_rate, reverse=True)
+        elif sort_key == "place_strike_rate":
+            items.sort(key=lambda x: x.place_strike_rate, reverse=True)
         elif sort_key == "tips":
             items.sort(key=lambda x: x.tips, reverse=True)
         elif sort_key == "label":
@@ -329,33 +316,33 @@ def compute_trends(
     # Calculate overall stats
     total_tips = sum(b.tips for b in by_tip_type.values())
     total_wins = sum(b.wins for b in by_tip_type.values())
-    total_staked = sum(b.total_staked for b in by_tip_type.values())
-    total_return = sum(b.total_return for b in by_tip_type.values())
+    total_seconds = sum(b.seconds for b in by_tip_type.values())
+    total_thirds = sum(b.thirds for b in by_tip_type.values())
+    total_podium = total_wins + total_seconds + total_thirds
 
     return {
         "has_data": True,
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
-        "stake_per_tip": stake_per_tip,
 
         "overall": {
             "tips": total_tips,
             "wins": total_wins,
+            "seconds": total_seconds,
+            "thirds": total_thirds,
+            "podium": total_podium,
             "win_strike_rate": round(total_wins / total_tips * 100, 1) if total_tips > 0 else 0,
-            "total_staked": float(total_staked),
-            "total_return": float(total_return),
-            "profit": float(total_return - total_staked),
-            "roi": round(float((total_return - total_staked) / total_staked * 100), 1) if total_staked > 0 else 0,
+            "place_strike_rate": round(total_podium / total_tips * 100, 1) if total_tips > 0 else 0,
         },
 
-        "by_distance": sort_buckets(by_distance, "roi"),
+        "by_distance": sort_buckets(by_distance, "win_strike_rate"),
         "by_price": sort_buckets(by_price, "label"),  # Sort by price range
-        "by_track_type": sort_buckets(by_track_type, "roi"),
+        "by_track_type": sort_buckets(by_track_type, "win_strike_rate"),
         "by_race_number": sort_race_numbers(by_race_number),
-        "by_class": sort_buckets(by_class, "roi"),
-        "by_state": sort_buckets(by_state, "roi"),
-        "by_tip_type": sort_buckets(by_tip_type, "roi"),
-        "by_track": sort_buckets(by_track, "roi"),
+        "by_class": sort_buckets(by_class, "win_strike_rate"),
+        "by_state": sort_buckets(by_state, "win_strike_rate"),
+        "by_tip_type": sort_buckets(by_tip_type, "win_strike_rate"),
+        "by_track": sort_buckets(by_track, "win_strike_rate"),
 
         # Insights - highlight best/worst performers
         "insights": _generate_insights(
@@ -381,12 +368,24 @@ def _generate_insights(
         items = [(k, v) for k, v in buckets.items() if v.tips >= min_tips]
         if not items:
             return None
-        best = max(items, key=lambda x: x[1].roi)
-        worst = min(items, key=lambda x: x[1].roi)
+        best = max(items, key=lambda x: x[1].win_strike_rate)
+        worst = min(items, key=lambda x: x[1].win_strike_rate)
         return {
             "category": category,
-            "best": {"label": best[0], "roi": round(best[1].roi, 1), "tips": best[1].tips, "win_sr": round(best[1].win_strike_rate, 1)},
-            "worst": {"label": worst[0], "roi": round(worst[1].roi, 1), "tips": worst[1].tips, "win_sr": round(worst[1].win_strike_rate, 1)},
+            "best": {
+                "label": best[0],
+                "win_sr": round(best[1].win_strike_rate, 1),
+                "place_sr": round(best[1].place_strike_rate, 1),
+                "tips": best[1].tips,
+                "wins": best[1].wins,
+            },
+            "worst": {
+                "label": worst[0],
+                "win_sr": round(worst[1].win_strike_rate, 1),
+                "place_sr": round(worst[1].place_strike_rate, 1),
+                "tips": worst[1].tips,
+                "wins": worst[1].wins,
+            },
         }
 
     # Generate insights for each category

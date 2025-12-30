@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd pf_meeting_id to race objects in /tips endpoint response\n\niOS app expects pf_meeting_id in each race object for matching logic.\nThis propagates the meeting''s pf_meeting_id into each race in the response.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(cd:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd trends analysis dashboard\n\nNew /ui/trends page with comprehensive analytics:\n- Performance by distance range \\(sprints vs stayers\\)\n- Performance by starting price \\(favourites vs roughies\\)\n- Performance by race number \\(early vs late races\\)\n- Performance by race class \\(maidens, benchmarks, etc.\\)\n- Performance by state\n- Performance by tip type \\(AI_BEST, DANGER, VALUE\\)\n- Performance by individual track\n- Key insights section highlighting best/worst performers\n\nAlso adds /api/trends JSON endpoint for programmatic access.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
+    ]
+  }
+}

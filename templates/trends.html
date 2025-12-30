@@ -85,29 +85,23 @@
             </div>
             <div class="summary-item">
               <div class="summary-label">WINNERS</div>
-              <div class="summary-value">{{ ov.wins }}</div>
+              <div class="summary-value summary-value--good">{{ ov.wins }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">2NDS</div>
+              <div class="summary-value">{{ ov.seconds }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">3RDS</div>
+              <div class="summary-value">{{ ov.thirds }}</div>
             </div>
             <div class="summary-item">
               <div class="summary-label">WIN STRIKE</div>
               <div class="summary-value">{{ ov.win_strike_rate }}%</div>
             </div>
             <div class="summary-item">
-              <div class="summary-label">TURNOVER</div>
-              <div class="summary-value summary-value--money">${{ "%.0f"|format(ov.total_staked) }}</div>
-            </div>
-            <div class="summary-item">
-              <div class="summary-label">P&L</div>
-              <div class="summary-value summary-value--money
-                          {% if ov.profit < 0 %}summary-value--bad{% elif ov.profit > 0 %}summary-value--good{% endif %}">
-                ${{ "%.0f"|format(ov.profit) }}
-              </div>
-            </div>
-            <div class="summary-item">
-              <div class="summary-label">ROI</div>
-              <div class="summary-value
-                          {% if ov.roi < 0 %}summary-value--bad{% elif ov.roi > 0 %}summary-value--good{% endif %}">
-                {{ ov.roi }}%
-              </div>
+              <div class="summary-label">PLACE STRIKE</div>
+              <div class="summary-value">{{ ov.place_strike_rate }}%</div>
             </div>
           </div>
         </div>
@@ -138,14 +132,14 @@
                 <div class="insight-row insight-row--best">
                   <span class="insight-icon">&#9650;</span>
                   <span class="insight-label">{{ insight.best.label }}</span>
-                  <span class="insight-stat summary-value--good">{{ insight.best.roi }}% ROI</span>
-                  <span class="insight-detail">({{ insight.best.win_sr }}% SR, {{ insight.best.tips }} tips)</span>
+                  <span class="insight-stat summary-value--good">{{ insight.best.win_sr }}% Win</span>
+                  <span class="insight-detail">({{ insight.best.wins }}/{{ insight.best.tips }} tips)</span>
                 </div>
                 <div class="insight-row insight-row--worst">
                   <span class="insight-icon">&#9660;</span>
                   <span class="insight-label">{{ insight.worst.label }}</span>
-                  <span class="insight-stat summary-value--bad">{{ insight.worst.roi }}% ROI</span>
-                  <span class="insight-detail">({{ insight.worst.win_sr }}% SR, {{ insight.worst.tips }} tips)</span>
+                  <span class="insight-stat summary-value--bad">{{ insight.worst.win_sr }}% Win</span>
+                  <span class="insight-detail">({{ insight.worst.wins }}/{{ insight.worst.tips }} tips)</span>
                 </div>
               </div>
             {% endfor %}
@@ -179,30 +173,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_tip_type %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td><strong>{{ item.label }}</strong></td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -236,30 +224,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_distance %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td>{{ item.label }}</td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -293,30 +275,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_price %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td>{{ item.label }}</td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -350,30 +326,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_race_number %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td>{{ item.label }}</td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -407,30 +377,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_class %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td>{{ item.label }}</td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -464,30 +428,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_state %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td>{{ item.label }}</td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -506,7 +464,7 @@
                 <h2 class="meeting-title">By Track</h2>
               </div>
               <div class="meeting-meta">
-                Individual track performance (sorted by ROI)
+                Individual track performance (sorted by Win Strike Rate)
               </div>
             </div>
           </div>
@@ -521,30 +479,24 @@
                 <th>Wins</th>
                 <th>2nds</th>
                 <th>3rds</th>
+                <th>Podium</th>
                 <th>Win SR%</th>
                 <th>Place SR%</th>
-                <th>Profit</th>
-                <th>ROI%</th>
               </tr>
             </thead>
             <tbody>
               {% for item in trends.by_track %}
                 {% set row_class = "" %}
-                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                {% if item.win_strike_rate >= 6 %}{% set row_class = "track-row--hot" %}{% elif item.win_strike_rate <= 3 %}{% set row_class = "track-row--cold" %}{% endif %}
                 <tr class="{{ row_class }}">
                   <td>{{ item.label }}</td>
                   <td>{{ item.tips }}</td>
                   <td>{{ item.wins }}</td>
                   <td>{{ item.seconds }}</td>
                   <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
                   <td>{{ item.win_strike_rate }}%</td>
                   <td>{{ item.place_strike_rate }}%</td>
-                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
-                    ${{ "%.0f"|format(item.profit) }}
-                  </td>
-                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
-                    {{ item.roi }}%
-                  </td>
                 </tr>
               {% endfor %}
             </tbody>

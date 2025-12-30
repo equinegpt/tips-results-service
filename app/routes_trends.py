@@ -22,7 +22,6 @@ templates = Jinja2Templates(directory="templates")
 def api_trends(
     from_date: date_type | None = Query(None, alias="from"),
     to_date: date_type | None = Query(None, alias="to"),
-    stake_per_tip: float = Query(10.0),
     db: Session = Depends(get_db),
 ):
     """
@@ -41,7 +40,6 @@ def api_trends(
         db=db,
         date_from=from_date,
         date_to=to_date,
-        stake_per_tip=stake_per_tip,
     )
 
 
@@ -50,7 +48,6 @@ def ui_trends(
     request: Request,
     from_date: date_type | None = Query(None),
     to_date: date_type | None = Query(None),
-    stake_per_tip: float = Query(10.0),
     db: Session = Depends(get_db),
 ):
     """
@@ -67,7 +64,6 @@ def ui_trends(
         db=db,
         date_from=from_date,
         date_to=to_date,
-        stake_per_tip=stake_per_tip,
     )
 
     display_range = f"{from_date.strftime('%d %b %Y')} - {to_date.strftime('%d %b %Y')}"
@@ -79,7 +75,6 @@ def ui_trends(
             "trends": trends_data,
             "from_date": from_date,
             "to_date": to_date,
-            "stake_per_tip": stake_per_tip,
             "display_range": display_range,
             "has_data": trends_data.get("has_data", False),
         },
