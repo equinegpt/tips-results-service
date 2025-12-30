@@ -436,6 +436,7 @@ def compute_trends(
     total_tips = 0
     matched_tips = 0
     scratched_tips = 0
+    no_result_tips = 0
 
     # 4) Process each tip
     for tip in all_tips:
@@ -445,22 +446,21 @@ def compute_trends(
         # Find matching result
         result = results_index.get(lookup_key)
 
-        # Determine outcome
-        finish_pos: Optional[int] = None
-        sp: Optional[float] = None
-        is_scratched = False
+        # Skip tips with no matching result - we can't determine outcome
+        if result is None:
+            no_result_tips += 1
+            continue
 
-        if result:
-            matched_tips += 1
-            is_scratched = result.is_scratched
-            if not is_scratched:
-                finish_pos = result.finishing_pos
-                sp = result.starting_price
+        matched_tips += 1
 
         # Skip scratched runners
-        if is_scratched:
+        if result.is_scratched:
             scratched_tips += 1
             continue
+
+        # Get outcome data
+        finish_pos = result.finishing_pos
+        sp = result.starting_price
 
         total_tips += 1
 
@@ -499,7 +499,7 @@ def compute_trends(
         update_bucket(by_tip_type, tip_type_key, finish_pos)
         update_bucket(by_track, track_key, finish_pos)
 
-    print(f"[TRENDS] Processed: {total_tips} tips (matched: {matched_tips}, scratched: {scratched_tips})")
+    print(f"[TRENDS] Processed: {total_tips} tips (matched: {matched_tips}, scratched: {scratched_tips}, no_result: {no_result_tips})")
 
     if total_tips == 0:
         return {"error": "No tips found after filtering", "has_data": False}
