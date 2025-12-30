@@ -246,6 +246,10 @@ def compute_trends(
 
     print(f"[TRENDS] Tips in window {date_from} -> {date_to}: {len(rows)}")
 
+    # Debug: sample some keys from the RA index
+    sample_ra_keys = list(ra_index.keys())[:5]
+    print(f"[TRENDS] Sample RA index keys: {sample_ra_keys}")
+
     # Initialize buckets for each dimension
     by_distance: Dict[str, TrendBucket] = {}
     by_price: Dict[str, TrendBucket] = {}
@@ -258,6 +262,8 @@ def compute_trends(
 
     tips_with_results = 0
     total_tips_counted = 0
+    missed_lookups = 0
+    first_few_misses = []
 
     # Process each tip (count ALL tips like Overview does)
     for tip, race, meeting in rows:
@@ -269,6 +275,16 @@ def compute_trends(
             tip.tab_number,
         )
         candidates = ra_index.get(ra_key) or []
+
+        # Track misses for debugging
+        if not candidates:
+            missed_lookups += 1
+            if len(first_few_misses) < 10:
+                first_few_misses.append({
+                    "key": ra_key,
+                    "track": meeting.track_name,
+                    "horse": tip.horse_name if hasattr(tip, 'horse_name') else f"tab#{tip.tab_number}"
+                })
 
         # Find matching RA row (with fuzzy track matching if multiple)
         ra_row = None
@@ -344,6 +360,9 @@ def compute_trends(
 
     print(f"[TRENDS] Total tips counted: {total_tips_counted}")
     print(f"[TRENDS] Tips with RA results: {tips_with_results}")
+    print(f"[TRENDS] Missed RA lookups: {missed_lookups}")
+    if first_few_misses:
+        print(f"[TRENDS] First few misses: {first_few_misses}")
 
     if total_tips_counted == 0:
         return {"error": "No tips found", "has_data": False}
