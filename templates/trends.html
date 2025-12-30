@@ -1,0 +1,625 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Trends Analysis - Tips Results Service
+{% endblock %}
+
+{% block body %}
+<main class="page-root">
+
+  {# -------------------- HEADER: LOGO + FILTERS -------------------- #}
+  <header class="page-header">
+    <div class="page-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            Trends Analysis
+          </div>
+          <div class="brand-subtitle">
+            Tips Results Service - {{ display_range or "All time" }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-header-right">
+      <form class="date-form" method="get" action="/ui/trends">
+        <span class="date-form-label">From</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">&#x1F4C5;</span>
+          <input
+            type="date"
+            id="from_date"
+            name="from_date"
+            value="{{ from_date.isoformat() if from_date }}"
+          />
+        </div>
+
+        <span class="date-form-label">To</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">&#x1F4C5;</span>
+          <input
+            type="date"
+            id="to_date"
+            name="to_date"
+            value="{{ to_date.isoformat() if to_date }}"
+          />
+        </div>
+
+        <button type="submit" class="btn-go">Apply</button>
+      </form>
+    </div>
+  </header>
+
+  {% if not has_data %}
+    <p class="empty-state">No results found for the selected date range.</p>
+  {% else %}
+
+    {# -------------------- OVERALL SUMMARY -------------------- #}
+    {% if trends.overall %}
+      {% set ov = trends.overall %}
+      <section class="meeting-card meeting-card--summary">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">Overall Performance</h2>
+              </div>
+              <div class="meeting-meta">
+                Summary of all tips in the selected period
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <div class="summary-grid summary-grid--day">
+            <div class="summary-item">
+              <div class="summary-label">TIPS</div>
+              <div class="summary-value">{{ ov.tips }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">WINNERS</div>
+              <div class="summary-value">{{ ov.wins }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">WIN STRIKE</div>
+              <div class="summary-value">{{ ov.win_strike_rate }}%</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">TURNOVER</div>
+              <div class="summary-value summary-value--money">${{ "%.0f"|format(ov.total_staked) }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">P&L</div>
+              <div class="summary-value summary-value--money
+                          {% if ov.profit < 0 %}summary-value--bad{% elif ov.profit > 0 %}summary-value--good{% endif %}">
+                ${{ "%.0f"|format(ov.profit) }}
+              </div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">ROI</div>
+              <div class="summary-value
+                          {% if ov.roi < 0 %}summary-value--bad{% elif ov.roi > 0 %}summary-value--good{% endif %}">
+                {{ ov.roi }}%
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- KEY INSIGHTS -------------------- #}
+    {% if trends.insights and trends.insights|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">Key Insights</h2>
+              </div>
+              <div class="meeting-meta">
+                Best and worst performers in each category (min 10 tips)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <div class="insights-grid">
+            {% for insight in trends.insights %}
+              <div class="insight-card">
+                <div class="insight-category">{{ insight.category }}</div>
+                <div class="insight-row insight-row--best">
+                  <span class="insight-icon">&#9650;</span>
+                  <span class="insight-label">{{ insight.best.label }}</span>
+                  <span class="insight-stat summary-value--good">{{ insight.best.roi }}% ROI</span>
+                  <span class="insight-detail">({{ insight.best.win_sr }}% SR, {{ insight.best.tips }} tips)</span>
+                </div>
+                <div class="insight-row insight-row--worst">
+                  <span class="insight-icon">&#9660;</span>
+                  <span class="insight-label">{{ insight.worst.label }}</span>
+                  <span class="insight-stat summary-value--bad">{{ insight.worst.roi }}% ROI</span>
+                  <span class="insight-detail">({{ insight.worst.win_sr }}% SR, {{ insight.worst.tips }} tips)</span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY TIP TYPE -------------------- #}
+    {% if trends.by_tip_type and trends.by_tip_type|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Tip Type</h2>
+              </div>
+              <div class="meeting-meta">
+                Performance breakdown by AI_BEST, DANGER, VALUE
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Tip Type</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_tip_type %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td><strong>{{ item.label }}</strong></td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY DISTANCE -------------------- #}
+    {% if trends.by_distance and trends.by_distance|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Distance</h2>
+              </div>
+              <div class="meeting-meta">
+                Are we better at sprints or staying races?
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Distance</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_distance %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY PRICE RANGE -------------------- #}
+    {% if trends.by_price and trends.by_price|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Starting Price</h2>
+              </div>
+              <div class="meeting-meta">
+                Are we better at picking favourites or roughies?
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Price Range</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_price %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY RACE NUMBER -------------------- #}
+    {% if trends.by_race_number and trends.by_race_number|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Race Number</h2>
+              </div>
+              <div class="meeting-meta">
+                Are early races easier to tip than late races?
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Race</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_race_number %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY RACE CLASS -------------------- #}
+    {% if trends.by_class and trends.by_class|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Race Class</h2>
+              </div>
+              <div class="meeting-meta">
+                Are we better at Maidens, Benchmarks, or Open races?
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Class</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_class %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY STATE -------------------- #}
+    {% if trends.by_state and trends.by_state|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By State</h2>
+              </div>
+              <div class="meeting-meta">
+                Performance by racing jurisdiction
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>State</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_state %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY TRACK -------------------- #}
+    {% if trends.by_track and trends.by_track|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Track</h2>
+              </div>
+              <div class="meeting-meta">
+                Individual track performance (sorted by ROI)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Track</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Win SR%</th>
+                <th>Place SR%</th>
+                <th>Profit</th>
+                <th>ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in trends.by_track %}
+                {% set row_class = "" %}
+                {% if item.roi >= 10 %}{% set row_class = "track-row--hot" %}{% elif item.roi <= -10 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.win_strike_rate }}%</td>
+                  <td>{{ item.place_strike_rate }}%</td>
+                  <td class="{% if item.profit < 0 %}summary-value--bad{% elif item.profit > 0 %}summary-value--good{% endif %}">
+                    ${{ "%.0f"|format(item.profit) }}
+                  </td>
+                  <td class="{% if item.roi < 0 %}summary-value--bad{% elif item.roi > 0 %}summary-value--good{% endif %}">
+                    {{ item.roi }}%
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+  {% endif %}
+</main>
+
+<style>
+  /* Insights grid styling */
+  .insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+  }
+
+  .insight-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .insight-category {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #888;
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .insight-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+    flex-wrap: wrap;
+  }
+
+  .insight-icon {
+    font-size: 0.8rem;
+  }
+
+  .insight-row--best .insight-icon {
+    color: #4ade80;
+  }
+
+  .insight-row--worst .insight-icon {
+    color: #f87171;
+  }
+
+  .insight-label {
+    font-weight: 500;
+    min-width: 120px;
+  }
+
+  .insight-stat {
+    font-weight: 600;
+  }
+
+  .insight-detail {
+    color: #888;
+    font-size: 0.85rem;
+  }
+
+  /* Hot/cold row highlighting */
+  .track-row--hot {
+    background: rgba(74, 222, 128, 0.1);
+  }
+
+  .track-row--cold {
+    background: rgba(248, 113, 113, 0.1);
+  }
+</style>
+{% endblock %}

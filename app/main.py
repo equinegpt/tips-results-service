@@ -14,6 +14,7 @@ from .routes_cron import router as cron_router
 from .routes_ui import router as ui_router
 from .routes_ui_overview import router as ui_overview_router
 from .routes_debug import router as debug_router
+from .routes_trends import router as trends_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -29,3 +30,4 @@ app.include_router(cron_router)
 app.include_router(ui_router)
 app.include_router(ui_overview_router)
 app.include_router(debug_router)
+app.include_router(trends_router)
