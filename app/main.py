@@ -16,6 +16,7 @@ from .routes_ui_overview import router as ui_overview_router
 from .routes_debug import router as debug_router
 from .routes_trends import router as trends_router
 from .routes_reasoning import router as reasoning_router
+from .routes_meeting_best import router as meeting_best_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,3 +34,4 @@ app.include_router(ui_overview_router)
 app.include_router(debug_router)
 app.include_router(trends_router)
 app.include_router(reasoning_router)
+app.include_router(meeting_best_router)

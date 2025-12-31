@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Meeting Best Analysis - Tips Results Service
+{% endblock %}
+
+{% block body %}
+<main class="page-root">
+
+  {# -------------------- HEADER: LOGO + FILTERS -------------------- #}
+  <header class="page-header">
+    <div class="page-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            Meeting Best Analysis
+          </div>
+          <div class="brand-subtitle">
+            AI_BEST + Skynet #1 Consensus - {{ display_range or "All time" }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-header-right">
+      <form class="date-form" method="get" action="/ui/meeting-best">
+        <span class="date-form-label">From</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">&#x1F4C5;</span>
+          <input
+            type="date"
+            id="from_date"
+            name="from_date"
+            value="{{ from_date.isoformat() if from_date }}"
+          />
+        </div>
+
+        <span class="date-form-label">To</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">&#x1F4C5;</span>
+          <input
+            type="date"
+            id="to_date"
+            name="to_date"
+            value="{{ to_date.isoformat() if to_date }}"
+          />
+        </div>
+
+        <button type="submit" class="btn-go">Apply</button>
+      </form>
+    </div>
+  </header>
+
+  {% if not has_data %}
+    <p class="empty-state">No Meeting Best tips found for the selected date range.</p>
+  {% else %}
+
+    {# -------------------- SUMMARY -------------------- #}
+    {% if data.summary %}
+      {% set s = data.summary %}
+      {% set ov = data.overall %}
+      <section class="meeting-card meeting-card--summary">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">Meeting Best Performance</h2>
+              </div>
+              <div class="meeting-meta">
+                When AI_BEST matches Skynet's #1 ranked horse
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <div class="summary-grid summary-grid--day">
+            <div class="summary-item">
+              <div class="summary-label">AI_BEST TIPS</div>
+              <div class="summary-value">{{ s.total_ai_best }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">MEETING BEST</div>
+              <div class="summary-value summary-value--highlight">{{ s.meeting_best_found }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">MATCH RATE</div>
+              <div class="summary-value">{{ s.match_rate }}%</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">PROCESSED</div>
+              <div class="summary-value">{{ s.processed }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">WINNERS</div>
+              <div class="summary-value summary-value--good">{{ ov.wins }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">WIN RATE</div>
+              <div class="summary-value {% if ov.win_rate >= 25 %}summary-value--good{% elif ov.win_rate < 15 %}summary-value--bad{% endif %}">{{ ov.win_rate }}%</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">PODIUM</div>
+              <div class="summary-value">{{ ov.podium }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">PLACE RATE</div>
+              <div class="summary-value">{{ ov.place_rate }}%</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- COMPARISON WITH ALL AI_BEST -------------------- #}
+    <section class="meeting-card">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <div class="meeting-title-row">
+              <h2 class="meeting-title">Why Meeting Best?</h2>
+            </div>
+            <div class="meeting-meta">
+              Consensus picks should outperform individual selections
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="meeting-body">
+        <div class="explanation-box">
+          <p><strong>Meeting Best</strong> occurs when our AI selects the same horse as Skynet's top-ranked runner.</p>
+          <p>This consensus between two independent systems suggests higher confidence in the selection.</p>
+          <p>From <strong>{{ data.summary.total_ai_best }}</strong> AI_BEST tips, <strong>{{ data.summary.meeting_best_found }}</strong> ({{ data.summary.match_rate }}%) matched Skynet #1.</p>
+        </div>
+      </div>
+    </section>
+
+    {# -------------------- BY STATE -------------------- #}
+    {% if data.by_state and data.by_state|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By State</h2>
+              </div>
+              <div class="meeting-meta">
+                Meeting Best performance by state
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>State</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Podium</th>
+                <th>Win Rate</th>
+                <th>Place Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in data.by_state %}
+                {% set row_class = "" %}
+                {% if item.win_rate >= 25 %}{% set row_class = "track-row--hot" %}{% elif item.win_rate < 15 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td><strong>{{ item.label }}</strong></td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
+                  <td>{{ item.win_rate }}%</td>
+                  <td>{{ item.place_rate }}%</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY STARTING PRICE -------------------- #}
+    {% if data.by_price and data.by_price|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Starting Price</h2>
+              </div>
+              <div class="meeting-meta">
+                How do Meeting Best tips perform at different odds?
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Price Range</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Podium</th>
+                <th>Win Rate</th>
+                <th>Place Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in data.by_price %}
+                {% set row_class = "" %}
+                {% if item.win_rate >= 25 %}{% set row_class = "track-row--hot" %}{% elif item.win_rate < 15 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
+                  <td>{{ item.win_rate }}%</td>
+                  <td>{{ item.place_rate }}%</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- BY TRACK TYPE -------------------- #}
+    {% if data.by_track_type and data.by_track_type|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">By Track Type</h2>
+              </div>
+              <div class="meeting-meta">
+                Metro vs Provincial/Country performance
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Track Type</th>
+                <th>Tips</th>
+                <th>Wins</th>
+                <th>2nds</th>
+                <th>3rds</th>
+                <th>Podium</th>
+                <th>Win Rate</th>
+                <th>Place Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in data.by_track_type %}
+                {% set row_class = "" %}
+                {% if item.win_rate >= 25 %}{% set row_class = "track-row--hot" %}{% elif item.win_rate < 15 %}{% set row_class = "track-row--cold" %}{% endif %}
+                <tr class="{{ row_class }}">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.tips }}</td>
+                  <td>{{ item.wins }}</td>
+                  <td>{{ item.seconds }}</td>
+                  <td>{{ item.thirds }}</td>
+                  <td>{{ item.podium }}</td>
+                  <td>{{ item.win_rate }}%</td>
+                  <td>{{ item.place_rate }}%</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {# -------------------- SAMPLE MATCHES -------------------- #}
+    {% if data.sample_matches and data.sample_matches|length > 0 %}
+      <section class="meeting-card">
+        <div class="meeting-header">
+          <div class="meeting-header-left">
+            <div class="meeting-title-block">
+              <div class="meeting-title-row">
+                <h2 class="meeting-title">Recent Meeting Best Tips</h2>
+              </div>
+              <div class="meeting-meta">
+                Sample of consensus selections and their results
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-body">
+          <table class="race-table track-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Track</th>
+                <th>Race</th>
+                <th>Horse</th>
+                <th>Tab</th>
+                <th>Skynet $</th>
+                <th>SP</th>
+                <th>Finish</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in data.sample_matches %}
+                <tr class="{% if m.is_winner %}track-row--hot{% elif m.finish_pos and m.finish_pos <= 3 %}{% else %}{% endif %}">
+                  <td>{{ m.date }}</td>
+                  <td>{{ m.track }} ({{ m.state }})</td>
+                  <td>R{{ m.race }}</td>
+                  <td><strong>{{ m.horse }}</strong></td>
+                  <td>{{ m.tab }}</td>
+                  <td>{% if m.skynet_price %}${{ "%.2f"|format(m.skynet_price) }}{% else %}-{% endif %}</td>
+                  <td>{% if m.sp %}${{ "%.2f"|format(m.sp) }}{% else %}-{% endif %}</td>
+                  <td>{% if m.finish_pos %}{{ m.finish_pos }}{% else %}-{% endif %}</td>
+                  <td>
+                    {% if m.is_winner %}
+                      <span class="result-badge result-badge--win">WIN</span>
+                    {% elif m.finish_pos == 2 %}
+                      <span class="result-badge result-badge--place">2ND</span>
+                    {% elif m.finish_pos == 3 %}
+                      <span class="result-badge result-badge--place">3RD</span>
+                    {% elif m.finish_pos %}
+                      <span class="result-badge">{{ m.finish_pos }}th</span>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+  {% endif %}
+</main>
+
+<style>
+  .explanation-box {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1.5rem;
+    line-height: 1.6;
+  }
+
+  .explanation-box p {
+    margin: 0 0 0.75rem 0;
+  }
+
+  .explanation-box p:last-child {
+    margin-bottom: 0;
+  }
+
+  .summary-value--highlight {
+    color: #60a5fa;
+    font-weight: 700;
+  }
+
+  .result-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .result-badge--win {
+    background: rgba(74, 222, 128, 0.2);
+    color: #4ade80;
+  }
+
+  .result-badge--place {
+    background: rgba(96, 165, 250, 0.2);
+    color: #60a5fa;
+  }
+
+  .track-row--hot {
+    background: rgba(74, 222, 128, 0.1);
+  }
+
+  .track-row--cold {
+    background: rgba(248, 113, 113, 0.1);
+  }
+</style>
+{% endblock %}
