@@ -158,11 +158,13 @@ def _fetch_skynet_rank1(d: date, use_cache: bool = True) -> Dict[Tuple[str, int,
     url = f"https://puntx.puntingform.com.au/api/skynet/getskynetprices"
 
     results = {}
-    max_retries = 3
+    max_retries = 2  # Fewer retries to avoid long hangs
+
+    print(f"[MEETING_BEST] Fetching Skynet for {d} ({date_str})")
 
     for attempt in range(max_retries):
         try:
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=15.0) as client:  # Shorter timeout
                 resp = client.get(url, params={
                     "meetingDate": date_str,
                     "apikey": api_key,
@@ -287,11 +289,11 @@ def _fetch_results_for_date(d: date, use_cache: bool = True) -> Dict[Tuple[str, 
     url = f"{base_url.rstrip('/')}/results"
 
     results = {}
-    max_retries = 3
+    max_retries = 2
 
     for attempt in range(max_retries):
         try:
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=15.0) as client:
                 resp = client.get(url, params={"date": d.isoformat()})
                 resp.raise_for_status()
                 data = resp.json()
@@ -341,7 +343,7 @@ def compute_meeting_best_trends(
     if date_to is None:
         date_to = date.today()
     if date_from is None:
-        date_from = date_to - timedelta(days=60)
+        date_from = date_to - timedelta(days=30)  # 30 days default for faster load
 
     print(f"[MEETING_BEST] Computing trends from {date_from} to {date_to}")
 
@@ -361,8 +363,15 @@ def compute_meeting_best_trends(
 
     day = date_from
     while day <= date_to:
-        # Fetch all data sources
+        # Fetch AI_BEST tips from database first (fast)
         ai_best_tips = _fetch_ai_best_from_db(db, day)
+
+        # Skip days with no tips - no need to call external APIs
+        if not ai_best_tips:
+            day += timedelta(days=1)
+            continue
+
+        # Only fetch external APIs if we have tips
         skynet_rank1 = _fetch_skynet_rank1(day)
         results = _fetch_results_for_date(day)
 
