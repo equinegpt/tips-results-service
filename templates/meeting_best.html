@@ -21,14 +21,14 @@
             Meeting Best Analysis
           </div>
           <div class="brand-subtitle">
-            AI_BEST + Skynet #1 Consensus - {{ display_range or "All time" }}
+            AI_BEST + Skynet #1 Consensus{% if display_range %} - {{ display_range }}{% endif %}
           </div>
         </div>
       </div>
     </div>
 
     <div class="page-header-right">
-      <form class="date-form" method="get" action="/ui/meeting-best">
+      <form class="date-form" method="get" action="/ui/meeting-best" id="date-form">
         <span class="date-form-label">From</span>
         <div class="date-form-input-wrap">
           <span class="date-form-icon">&#x1F4C5;</span>
@@ -51,13 +51,55 @@
           />
         </div>
 
-        <button type="submit" class="btn-go">Apply</button>
+        <button type="submit" class="btn-go">Analyse</button>
       </form>
     </div>
   </header>
 
-  {% if not has_data %}
+  {# -------------------- EMPTY STATE -------------------- #}
+  {% if empty_state %}
+    <section class="meeting-card meeting-card--empty">
+      <div class="meeting-header">
+        <div class="meeting-header-left">
+          <div class="meeting-title-block">
+            <div class="meeting-title-row">
+              <h2 class="meeting-title">Select a Date Range</h2>
+            </div>
+            <div class="meeting-meta">
+              Choose dates above or use a quick selection below
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="meeting-body">
+        <div class="quick-select-grid">
+          <a href="/ui/meeting-best?from_date={{ quick_7_from }}&to_date={{ today_iso }}" class="quick-select-btn">
+            <span class="quick-select-label">Last 7 Days</span>
+            <span class="quick-select-hint">Recommended</span>
+          </a>
+          <a href="/ui/meeting-best?from_date={{ quick_14_from }}&to_date={{ today_iso }}" class="quick-select-btn">
+            <span class="quick-select-label">Last 14 Days</span>
+            <span class="quick-select-hint">~2 weeks</span>
+          </a>
+          <a href="/ui/meeting-best?from_date={{ quick_30_from }}&to_date={{ today_iso }}" class="quick-select-btn">
+            <span class="quick-select-label">Last 30 Days</span>
+            <span class="quick-select-hint">May be slow</span>
+          </a>
+        </div>
+
+        <div class="explanation-box" style="margin-top: 2rem;">
+          <h3>What is Meeting Best?</h3>
+          <p><strong>Meeting Best</strong> tips occur when our AI selects the same horse as Skynet's top-ranked runner.</p>
+          <p>This consensus between two independent systems suggests higher confidence in the selection.</p>
+          <p>Select a date range to see how these consensus picks have performed.</p>
+        </div>
+      </div>
+    </section>
+
+  {% elif not has_data %}
     <p class="empty-state">No Meeting Best tips found for the selected date range.</p>
+
   {% else %}
 
     {# -------------------- SUMMARY -------------------- #}
@@ -116,30 +158,6 @@
         </div>
       </section>
     {% endif %}
-
-    {# -------------------- COMPARISON WITH ALL AI_BEST -------------------- #}
-    <section class="meeting-card">
-      <div class="meeting-header">
-        <div class="meeting-header-left">
-          <div class="meeting-title-block">
-            <div class="meeting-title-row">
-              <h2 class="meeting-title">Why Meeting Best?</h2>
-            </div>
-            <div class="meeting-meta">
-              Consensus picks should outperform individual selections
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="meeting-body">
-        <div class="explanation-box">
-          <p><strong>Meeting Best</strong> occurs when our AI selects the same horse as Skynet's top-ranked runner.</p>
-          <p>This consensus between two independent systems suggests higher confidence in the selection.</p>
-          <p>From <strong>{{ data.summary.total_ai_best }}</strong> AI_BEST tips, <strong>{{ data.summary.meeting_best_found }}</strong> ({{ data.summary.match_rate }}%) matched Skynet #1.</p>
-        </div>
-      </div>
-    </section>
 
     {# -------------------- BY STATE -------------------- #}
     {% if data.by_state and data.by_state|length > 0 %}
@@ -361,11 +379,54 @@
 </main>
 
 <style>
+  .quick-select-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    max-width: 700px;
+  }
+
+  .quick-select-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s ease;
+  }
+
+  .quick-select-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(96, 165, 250, 0.5);
+    transform: translateY(-2px);
+  }
+
+  .quick-select-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #60a5fa;
+  }
+
+  .quick-select-hint {
+    font-size: 0.85rem;
+    color: #888;
+    margin-top: 0.25rem;
+  }
+
   .explanation-box {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
     padding: 1.5rem;
     line-height: 1.6;
+  }
+
+  .explanation-box h3 {
+    margin: 0 0 1rem 0;
+    color: #60a5fa;
   }
 
   .explanation-box p {
@@ -406,6 +467,10 @@
 
   .track-row--cold {
     background: rgba(248, 113, 113, 0.1);
+  }
+
+  .meeting-card--empty {
+    max-width: 800px;
   }
 </style>
 {% endblock %}

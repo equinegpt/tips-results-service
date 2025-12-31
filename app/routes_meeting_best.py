@@ -21,8 +21,8 @@ templates = Jinja2Templates(directory="templates")
 
 @router.get("/api/meeting-best")
 def api_meeting_best(
-    from_date: date_type | None = Query(None, alias="from"),
-    to_date: date_type | None = Query(None, alias="to"),
+    from_date: date_type = Query(..., alias="from"),
+    to_date: date_type = Query(..., alias="to"),
     db: Session = Depends(get_db),
 ):
     """
@@ -31,13 +31,8 @@ def api_meeting_best(
     Meeting Best = AI_BEST tip matches Skynet rank=1 horse for same race.
 
     Example:
-        /api/meeting-best?from=2025-12-01&to=2025-12-30
+        /api/meeting-best?from=2025-12-01&to=2025-12-07
     """
-    if to_date is None:
-        to_date = date_type.today()
-    if from_date is None:
-        from_date = to_date - timedelta(days=60)
-
     return compute_meeting_best_trends(
         db=db,
         date_from=from_date,
@@ -54,12 +49,37 @@ def ui_meeting_best(
 ):
     """
     HTML dashboard for Meeting Best analytics.
-    """
-    if to_date is None:
-        to_date = date_type.today()
-    if from_date is None:
-        from_date = to_date - timedelta(days=60)
 
+    If no dates provided, shows empty state with date picker.
+    """
+    # If no dates, show empty page with date picker
+    if from_date is None or to_date is None:
+        today = date_type.today()
+
+        # Pre-compute quick select dates
+        quick_7_from = (today - timedelta(days=7)).isoformat()
+        quick_14_from = (today - timedelta(days=14)).isoformat()
+        quick_30_from = (today - timedelta(days=30)).isoformat()
+        today_iso = today.isoformat()
+
+        return templates.TemplateResponse(
+            "meeting_best.html",
+            {
+                "request": request,
+                "data": None,
+                "from_date": today - timedelta(days=7),
+                "to_date": today,
+                "display_range": None,
+                "has_data": False,
+                "empty_state": True,
+                "quick_7_from": quick_7_from,
+                "quick_14_from": quick_14_from,
+                "quick_30_from": quick_30_from,
+                "today_iso": today_iso,
+            },
+        )
+
+    # Dates provided - fetch and compute
     data = compute_meeting_best_trends(
         db=db,
         date_from=from_date,
@@ -77,5 +97,6 @@ def ui_meeting_best(
             "to_date": to_date,
             "display_range": display_range,
             "has_data": data.get("has_data", False),
+            "empty_state": False,
         },
     )
