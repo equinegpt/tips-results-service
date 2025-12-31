@@ -209,10 +209,12 @@ def _fetch_skynet_rank1(d: date, use_cache: bool = True) -> Dict[Tuple[str, int,
         except Exception as e:
             if attempt < max_retries - 1:
                 print(f"[MEETING_BEST] Retry {attempt + 1}/{max_retries} for Skynet {d}: {e}")
-                time.sleep(2 ** attempt)
+                time.sleep(1)  # Short sleep between retries
             else:
                 print(f"[MEETING_BEST] Failed fetching Skynet for {d}: {e}")
 
+    # Cache empty results to avoid re-fetching failed dates
+    _skynet_cache[d] = (time.time(), results)
     return results
 
 
