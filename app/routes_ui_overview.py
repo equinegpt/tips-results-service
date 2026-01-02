@@ -5,8 +5,9 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, Any, List, Tuple, Set
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,7 @@ from .ra_results_client import RAResultsClient
 from .daily_generator import _tracks_match  # reuse the same fuzzy track matcher
 
 router = APIRouter()
+templates = Jinja2Templates(directory="templates")
 
 
 def _today_melb() -> date:
@@ -180,6 +182,7 @@ def _compute_quaddie_for_bucket(
 
 @router.get("/ui/overview", response_class=HTMLResponse)
 def ui_overview(
+    request: Request,
     date_from: Optional[str] = Query(
         None,
         description="Start date (YYYY-MM-DD). Default: 7 days ago (incl. today).",
@@ -443,209 +446,15 @@ def ui_overview(
     if json:
         return JSONResponse(payload)
 
-    # 5) Render HTML
-    html_rows = []
-    for t in tracks:
-        win_sr_pct = 100.0 * t["winStrikeRate"]
-        place_sr_pct = 100.0 * t["placeStrikeRate"]
-        roi_pct = 100.0 * t["roi"]
-
-        if t["roi"] > 0:
-            roi_class = "roi-pos"
-        elif t["roi"] < 0:
-            roi_class = "roi-neg"
-        else:
-            roi_class = "roi-zero"
-
-        # Quaddie display
-        if t.get("quaddieEligible"):
-            if t.get("quaddieHit"):
-                quaddie_html = '<span class="quaddie-tick">✓</span>'
-            else:
-                quaddie_html = f'<span class="quaddie-miss">{t.get("quaddieHits", 0)}/4</span>'
-        else:
-            quaddie_html = '<span class="quaddie-na">–</span>'
-
-        html_rows.append(
-            f"""
-            <tr>
-              <td>{t["date"]}</td>
-              <td>{t["track"]}</td>
-              <td>{t["state"]}</td>
-              <td style="text-align:right">{t["tips"]}</td>
-              <td style="text-align:right">{t["wins"]}</td>
-              <td style="text-align:right">{t.get("aiBestWins", 0)}</td>
-              <td style="text-align:right">{t.get("quinellas", 0)}</td>
-              <td style="text-align:right">{t.get("trifectas", 0)}</td>
-              <td style="text-align:right">{quaddie_html}</td>
-              <td style="text-align:right">{win_sr_pct:.1f}%</td>
-              <td style="text-align:right">{place_sr_pct:.1f}%</td>
-              <td style="text-align:right">{t["return"]:.2f}</td>
-              <td class="{roi_class}" style="text-align:right">{roi_pct:.1f}%</td>
-            </tr>
-            """
-        )
-
-    html = f"""
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Tips Overview ({payload["dateFrom"]} → {payload["dateTo"]})</title>
-    <style>
-      body {{
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        padding: 16px;
-        background-color: #0b0c10;
-        color: #f5f5f5;
-      }}
-      h1 {{
-        margin-bottom: 4px;
-      }}
-      .meta {{
-        color: #aaa;
-        margin-bottom: 16px;
-      }}
-      table {{
-        border-collapse: collapse;
-        width: 100%;
-        font-size: 14px;
-      }}
-      th, td {{
-        padding: 6px 8px;
-        border-bottom: 1px solid #333;
-      }}
-      th {{
-        text-align: left;
-        background-color: #151820;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }}
-      tr:nth-child(even) {{
-        background-color: #151820;
-      }}
-      tr:nth-child(odd) {{
-        background-color: #11131a;
-      }}
-      .roi-pos {{
-        color: #18CB96;
-        font-weight: 600;
-      }}
-      .roi-neg {{
-        color: #ff6b6b;
-        font-weight: 600;
-      }}
-      .roi-zero {{
-        color: #ddd;
-      }}
-
-      /* NEW: Quaddie styling */
-      .quaddie-tick {{
-        color: #18CB96;
-        font-weight: 900;
-        font-size: 16px;
-        line-height: 1;
-      }}
-      .quaddie-miss {{
-        color: #c7c7c7;
-        font-variant-numeric: tabular-nums;
-      }}
-      .quaddie-na {{
-        color: #7b7b7b;
-      }}
-
-      .pill {{
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: #151820;
-        font-size: 12px;
-        margin-left: 4px;
-      }}
-      .controls {{
-        margin-bottom: 12px;
-      }}
-      .controls form {{
-        display: inline-block;
-        margin-right: 16px;
-      }}
-      .controls label {{
-        margin-right: 8px;
-        font-size: 13px;
-        color: #ccc;
-      }}
-      .controls input[type="date"] {{
-        background: #11131a;
-        border: 1px solid #333;
-        color: #f5f5f5;
-        border-radius: 4px;
-        padding: 2px 4px;
-      }}
-      .controls button {{
-        background: #18CB96;
-        border: none;
-        color: #0b0c10;
-        border-radius: 4px;
-        padding: 4px 10px;
-        font-size: 13px;
-        cursor: pointer;
-      }}
-      .controls a {{
-        color: #18CB96;
-        text-decoration: none;
-        margin-right: 12px;
-        font-size: 13px;
-      }}
-    </style>
-  </head>
-  <body>
-    <h1>Tips Overview</h1>
-    <div class="meta">
-      Window: <strong>{payload["dateFrom"]}</strong> → <strong>{payload["dateTo"]}</strong>
-      <span class="pill">rows: {len(tracks)}</span>
-      <span class="pill">tips: {sum(t["tips"] for t in tracks)}</span>
-      <span class="pill">quaddies: {payload.get("quaddieHits", 0)}</span>
-    </div>
-    <div class="controls">
-      <form method="get" action="/ui/overview">
-        <label>
-          From
-          <input type="date" name="date_from" value="{payload["dateFrom"]}">
-        </label>
-        <label>
-          To
-          <input type="date" name="date_to" value="{payload["dateTo"]}">
-        </label>
-        <button type="submit">Apply</button>
-      </form>
-      <a href="/ui/overview?date_from={payload["dateFrom"]}&date_to={payload["dateTo"]}&json=1">
-        View as JSON
-      </a>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Track</th>
-          <th>State</th>
-          <th style="text-align:right">Tips</th>
-          <th style="text-align:right">Wins</th>
-          <th style="text-align:right">AI Best Wins</th>
-          <th style="text-align:right">Quinellas</th>
-          <th style="text-align:right">Trifectas</th>
-          <th style="text-align:right">Quaddie</th>
-          <th style="text-align:right">Win SR</th>
-          <th style="text-align:right">Place SR</th>
-          <th style="text-align:right">Return</th>
-          <th style="text-align:right">ROI</th>
-        </tr>
-      </thead>
-      <tbody>
-        {''.join(html_rows) if html_rows else '<tr><td colspan="13">No tips in this window.</td></tr>'}
-      </tbody>
-    </table>
-  </body>
-</html>
-"""
-    return HTMLResponse(content=html)
+    # 5) Render HTML via Jinja2 template
+    return templates.TemplateResponse(
+        "overview_table.html",
+        {
+            "request": request,
+            "date_from": d_from,
+            "date_to": d_to,
+            "tracks": tracks,
+            "total_tips": sum(t["tips"] for t in tracks),
+            "quaddie_hits": payload.get("quaddieHits", 0),
+        },
+    )

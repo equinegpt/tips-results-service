@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Tips Overview ({{ date_from.isoformat() }} - {{ date_to.isoformat() }})
+{% endblock %}
+
+{% block body %}
+<main class="page-root">
+
+  {# -------------------- HEADER: LOGO + FILTERS -------------------- #}
+  <header class="page-header">
+    <div class="page-header-left">
+      <div class="brand-lockup">
+        <img
+          src="{{ url_for('static', path='stablfy-logo.png') }}"
+          alt="Stablfy"
+          class="brand-logo"
+        />
+        <div class="brand-text">
+          <div class="brand-title">
+            Tips Overview
+          </div>
+          <div class="brand-subtitle">
+            {{ date_from.strftime('%d %b %Y') }} - {{ date_to.strftime('%d %b %Y') }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-header-right">
+      <form class="date-form" method="get" action="/ui/overview">
+        <span class="date-form-label">From</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">&#x1F4C5;</span>
+          <input
+            type="date"
+            id="date_from"
+            name="date_from"
+            value="{{ date_from.isoformat() }}"
+          />
+        </div>
+
+        <span class="date-form-label">To</span>
+        <div class="date-form-input-wrap">
+          <span class="date-form-icon">&#x1F4C5;</span>
+          <input
+            type="date"
+            id="date_to"
+            name="date_to"
+            value="{{ date_to.isoformat() }}"
+          />
+        </div>
+
+        <button type="submit" class="btn-go">Apply</button>
+      </form>
+    </div>
+  </header>
+
+  {# -------------------- SUMMARY PILLS -------------------- #}
+  <div class="overview-meta">
+    <span class="pill">Rows: {{ tracks|length }}</span>
+    <span class="pill">Tips: {{ total_tips }}</span>
+    <span class="pill">Quaddies: {{ quaddie_hits }}</span>
+    <a href="/ui/overview?date_from={{ date_from.isoformat() }}&date_to={{ date_to.isoformat() }}&json=1" class="pill pill--link">
+      View JSON
+    </a>
+  </div>
+
+  {# -------------------- MAIN TABLE -------------------- #}
+  {% if tracks and tracks|length > 0 %}
+    <section class="meeting-card">
+      <div class="meeting-body">
+        <table class="race-table track-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Track</th>
+              <th>State</th>
+              <th style="text-align:right">Tips</th>
+              <th style="text-align:right">Wins</th>
+              <th style="text-align:right">AI Best</th>
+              <th style="text-align:right">Quin</th>
+              <th style="text-align:right">Tri</th>
+              <th style="text-align:right">Quaddie</th>
+              <th style="text-align:right">Win SR</th>
+              <th style="text-align:right">Place SR</th>
+              <th style="text-align:right">Return</th>
+              <th style="text-align:right">ROI</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in tracks %}
+              {% set win_sr_pct = (t.winStrikeRate * 100)|round(1) %}
+              {% set place_sr_pct = (t.placeStrikeRate * 100)|round(1) %}
+              {% set roi_pct = (t.roi * 100)|round(1) %}
+              {% set row_class = "" %}
+              {% if t.roi > 0.1 %}{% set row_class = "track-row--hot" %}{% elif t.roi < -0.1 %}{% set row_class = "track-row--cold" %}{% endif %}
+              <tr class="{{ row_class }}">
+                <td>{{ t.date }}</td>
+                <td>{{ t.track }}</td>
+                <td>{{ t.state }}</td>
+                <td style="text-align:right">{{ t.tips }}</td>
+                <td style="text-align:right">{{ t.wins }}</td>
+                <td style="text-align:right">{{ t.aiBestWins or 0 }}</td>
+                <td style="text-align:right">{{ t.quinellas or 0 }}</td>
+                <td style="text-align:right">{{ t.trifectas or 0 }}</td>
+                <td style="text-align:right">
+                  {% if t.quaddieEligible %}
+                    {% if t.quaddieHit %}
+                      <span class="quaddie-tick">&#x2713;</span>
+                    {% else %}
+                      <span class="quaddie-miss">{{ t.quaddieHits or 0 }}/4</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="quaddie-na">-</span>
+                  {% endif %}
+                </td>
+                <td style="text-align:right">{{ win_sr_pct }}%</td>
+                <td style="text-align:right">{{ place_sr_pct }}%</td>
+                <td style="text-align:right">${{ "%.2f"|format(t.return) }}</td>
+                <td style="text-align:right" class="{% if t.roi > 0 %}summary-value--good{% elif t.roi < 0 %}summary-value--bad{% endif %}">
+                  {{ roi_pct }}%
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <p class="empty-state">No tips found in this date range.</p>
+  {% endif %}
+
+</main>
+
+<style>
+  .overview-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .pill {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .pill--link {
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .pill--link:hover {
+    background: var(--accent-soft);
+  }
+
+  .quaddie-tick {
+    color: #4ade80;
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .quaddie-miss {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .quaddie-na {
+    color: #555;
+  }
+</style>
+{% endblock %}
