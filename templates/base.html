@@ -12,6 +12,24 @@
     />
   </head>
   <body>
+    <nav class="top-nav">
+      <a href="/ui/day" class="nav-link{% if request.url.path.startswith('/ui/day') %} nav-link--active{% endif %}">
+        Day view
+      </a>
+      <a href="/ui/overview" class="nav-link{% if request.url.path == '/ui/overview' %} nav-link--active{% endif %}">
+        Overview
+      </a>
+      <a href="/ui/trends" class="nav-link{% if request.url.path == '/ui/trends' %} nav-link--active{% endif %}">
+        Trends
+      </a>
+      <a href="/ui/reasoning" class="nav-link{% if request.url.path == '/ui/reasoning' %} nav-link--active{% endif %}">
+        Reasoning
+      </a>
+      <a href="/ui/meeting-best" class="nav-link{% if request.url.path == '/ui/meeting-best' %} nav-link--active{% endif %}">
+        Meeting Best
+      </a>
+    </nav>
+
     {% block body %}{% endblock %}
 
     <script>
@@ -28,20 +46,3 @@
     </script>
   </body>
 </html>
-<nav class="top-nav">
-  <a href="/ui/day?date={{ date.isoformat() if date is defined else '' }}" class="nav-link">
-    Day view
-  </a>
-  <a href="/ui/overview" class="nav-link">
-    Overview
-  </a>
-  <a href="/ui/trends" class="nav-link">
-    Trends
-  </a>
-  <a href="/ui/reasoning" class="nav-link">
-    Reasoning
-  </a>
-  <a href="/ui/meeting-best" class="nav-link">
-    Meeting Best
-  </a>
-</nav>
