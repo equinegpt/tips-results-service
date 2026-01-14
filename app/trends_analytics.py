@@ -505,9 +505,16 @@ def compute_trends(
         return {"error": "No tips found after filtering", "has_data": False}
 
     # 5) Sort and convert to output format
-    def sort_buckets(buckets: Dict[str, TrendBucket], sort_key: str = "win_strike_rate") -> List[Dict]:
+    def sort_buckets(
+        buckets: Dict[str, TrendBucket],
+        sort_key: str = "win_strike_rate",
+        exclude_zero_results: bool = False,
+    ) -> List[Dict]:
         items = list(buckets.values())
         items = [b for b in items if b.tips >= 5]
+        # Exclude abandoned meetings/tracks with zero results (0 wins, 0 seconds, 0 thirds)
+        if exclude_zero_results:
+            items = [b for b in items if b.podium_total > 0]
         if sort_key == "win_strike_rate":
             items.sort(key=lambda x: x.win_strike_rate, reverse=True)
         elif sort_key == "place_strike_rate":
@@ -521,14 +528,18 @@ def compute_trends(
     def sort_race_numbers(buckets: Dict[str, TrendBucket]) -> List[Dict]:
         items = list(buckets.values())
         items = [b for b in items if b.tips >= 5]
+        # Exclude abandoned race numbers with zero results
+        items = [b for b in items if b.podium_total > 0]
         items.sort(key=lambda x: int(x.label.replace("Race ", "")) if x.label.startswith("Race ") else 99)
         return [b.to_dict() for b in items]
 
-    # Calculate overall stats
-    overall_tips = sum(b.tips for b in by_tip_type.values())
-    overall_wins = sum(b.wins for b in by_tip_type.values())
-    overall_seconds = sum(b.seconds for b in by_tip_type.values())
-    overall_thirds = sum(b.thirds for b in by_tip_type.values())
+    # Calculate overall stats - exclude abandoned tracks (those with 0 podium finishes)
+    # This ensures abandoned meetings don't skew our overall strike rates
+    valid_tracks = [b for b in by_track.values() if b.podium_total > 0]
+    overall_tips = sum(b.tips for b in valid_tracks)
+    overall_wins = sum(b.wins for b in valid_tracks)
+    overall_seconds = sum(b.seconds for b in valid_tracks)
+    overall_thirds = sum(b.thirds for b in valid_tracks)
     overall_podium = overall_wins + overall_seconds + overall_thirds
 
     return {
@@ -546,14 +557,15 @@ def compute_trends(
             "place_strike_rate": round(overall_podium / overall_tips * 100, 1) if overall_tips > 0 else 0,
         },
 
-        "by_distance": sort_buckets(by_distance, "win_strike_rate"),
-        "by_price": sort_buckets(by_price, "label"),
-        "by_track_type": sort_buckets(by_track_type, "win_strike_rate"),
+        # exclude_zero_results=True filters out abandoned tracks/meetings with no results
+        "by_distance": sort_buckets(by_distance, "win_strike_rate", exclude_zero_results=True),
+        "by_price": sort_buckets(by_price, "label", exclude_zero_results=True),
+        "by_track_type": sort_buckets(by_track_type, "win_strike_rate", exclude_zero_results=True),
         "by_race_number": sort_race_numbers(by_race_number),
-        "by_class": sort_buckets(by_class, "win_strike_rate"),
-        "by_state": sort_buckets(by_state, "win_strike_rate"),
-        "by_tip_type": sort_buckets(by_tip_type, "win_strike_rate"),
-        "by_track": sort_buckets(by_track, "win_strike_rate"),
+        "by_class": sort_buckets(by_class, "win_strike_rate", exclude_zero_results=True),
+        "by_state": sort_buckets(by_state, "win_strike_rate", exclude_zero_results=True),
+        "by_tip_type": sort_buckets(by_tip_type, "win_strike_rate"),  # Keep all tip types even with 0 wins
+        "by_track": sort_buckets(by_track, "win_strike_rate", exclude_zero_results=True),
 
         "insights": _generate_insights(
             by_distance, by_price, by_track_type,
