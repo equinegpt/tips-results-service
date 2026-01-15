@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import date as date_type
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -12,6 +12,53 @@ from . import schemas, models, daily_generator
 from .clients import ireel_client
 
 router = APIRouter()
+
+
+def _meeting_has_tips(
+    db: Session,
+    meeting_date: date_type,
+    track_name: str,
+    state: str,
+    pf_meeting_id: Optional[int] = None,
+) -> bool:
+    """
+    Check if tips already exist for a meeting.
+    Returns True if a TipRun exists for this meeting, False otherwise.
+    """
+    # First try to find the meeting
+    meeting: models.Meeting | None = None
+
+    # Try pf_meeting_id first if available
+    if pf_meeting_id is not None:
+        meeting = (
+            db.query(models.Meeting)
+            .filter(models.Meeting.pf_meeting_id == pf_meeting_id)
+            .first()
+        )
+
+    # Fallback to natural key
+    if meeting is None:
+        meeting = (
+            db.query(models.Meeting)
+            .filter(
+                models.Meeting.date == meeting_date,
+                models.Meeting.track_name == track_name,
+                models.Meeting.state == state,
+            )
+            .first()
+        )
+
+    if meeting is None:
+        return False
+
+    # Check if any TipRun exists for this meeting
+    tip_run_count = (
+        db.query(models.TipRun)
+        .filter(models.TipRun.meeting_id == meeting.id)
+        .count()
+    )
+
+    return tip_run_count > 0
 
 
 @router.post("/tips/batch", response_model=schemas.MeetingTipsOut)
@@ -268,11 +315,28 @@ def cron_generate_daily_tips(
     meetings_processed = 0
     tip_runs_created = 0
     races_with_tips = 0
+    meetings_skipped = 0
     errors: list[dict[str, Any]] = []
 
     for payload in payloads:
         meeting = payload.meeting
         tip_run_in = payload.tip_run
+
+        # Check if tips already exist for this meeting - skip if so
+        if _meeting_has_tips(
+            db=db,
+            meeting_date=meeting.date,
+            track_name=meeting.track_name,
+            state=meeting.state,
+            pf_meeting_id=getattr(meeting, "pf_meeting_id", None),
+        ):
+            print(
+                f"[CRON] SKIPPING {meeting.track_name} ({meeting.state}) on {meeting.date} "
+                f"- tips already exist"
+            )
+            meetings_skipped += 1
+            continue
+
         races_entries: list[dict[str, Any]] = []
 
         for race_ctx in payload.races:
@@ -349,6 +413,7 @@ def cron_generate_daily_tips(
         meetings_processed=meetings_processed,
         tip_runs_created=tip_runs_created,
         races_with_tips=races_with_tips,
+        meetings_skipped=meetings_skipped,
     )
 
 

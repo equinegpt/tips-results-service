@@ -143,3 +143,4 @@ class CronGenerateTipsOut(BaseModel):
     meetings_processed: int
     tip_runs_created: int
     races_with_tips: int
+    meetings_skipped: int = 0  # meetings skipped because tips already exist
