@@ -573,3 +573,59 @@ def list_tips(
             )
 
     return results
+
+
+@router.put("/tips/{tip_id}", response_model=schemas.TipOut)
+def edit_tip(
+    tip_id: str,
+    payload: schemas.TipEditIn,
+    db: Session = Depends(get_db),
+):
+    """
+    Edit an existing tip. Only provided fields will be updated.
+    """
+    tip = db.query(models.Tip).filter(models.Tip.id == tip_id).first()
+
+    if tip is None:
+        raise HTTPException(status_code=404, detail=f"Tip {tip_id} not found")
+
+    # Update only provided fields
+    if payload.tip_type is not None:
+        tip.tip_type = payload.tip_type
+    if payload.tab_number is not None:
+        tip.tab_number = payload.tab_number
+    if payload.horse_name is not None:
+        tip.horse_name = payload.horse_name
+    if payload.reasoning is not None:
+        tip.reasoning = payload.reasoning
+    if payload.stake_units is not None:
+        tip.stake_units = payload.stake_units
+
+    db.commit()
+    db.refresh(tip)
+
+    print(f"[TIPS] Updated tip {tip_id}: {tip.tip_type} #{tip.tab_number} {tip.horse_name}")
+
+    return schemas.TipOut.model_validate(tip)
+
+
+@router.delete("/tips/{tip_id}")
+def delete_tip(
+    tip_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a specific tip.
+    """
+    tip = db.query(models.Tip).filter(models.Tip.id == tip_id).first()
+
+    if tip is None:
+        raise HTTPException(status_code=404, detail=f"Tip {tip_id} not found")
+
+    tip_info = f"{tip.tip_type} #{tip.tab_number} {tip.horse_name}"
+    db.delete(tip)
+    db.commit()
+
+    print(f"[TIPS] Deleted tip {tip_id}: {tip_info}")
+
+    return {"ok": True, "deleted": tip_id}

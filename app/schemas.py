@@ -90,6 +90,15 @@ class TipOut(BaseModel):
     class Config:
         from_attributes = True
 
+
+class TipEditIn(BaseModel):
+    """Schema for editing an existing tip"""
+    tip_type: Optional[TipType] = None
+    tab_number: Optional[int] = None
+    horse_name: Optional[str] = None
+    reasoning: Optional[str] = None
+    stake_units: Optional[float] = None
+
 class FetchPfResultsOut(BaseModel):
     ok: bool
     date: str
