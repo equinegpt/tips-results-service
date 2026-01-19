@@ -458,3 +458,197 @@ def ui_overview(
             "quaddie_hits": payload.get("quaddieHits", 0),
         },
     )
+
+
+@router.get("/ui/meeting-social", response_class=HTMLResponse)
+def ui_meeting_social(
+    request: Request,
+    meeting_date: str = Query(..., alias="date"),
+    track: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a social-media-friendly summary card for a single meeting.
+    Shows race-by-race results with AI Best winners highlighted.
+    """
+    d = _parse_date_param(meeting_date)
+    if d is None:
+        d = _today_melb()
+
+    # 1) Build RA results index for this single day
+    ra_index, _ = _build_ra_results_indexes(d, d)
+
+    # 2) Fetch tips for this specific meeting
+    rows = (
+        db.query(Tip, TipOutcome, Race, Meeting)
+        .join(Race, Tip.race_id == Race.id)
+        .join(Meeting, Race.meeting_id == Meeting.id)
+        .outerjoin(TipOutcome, TipOutcome.tip_id == Tip.id)
+        .filter(
+            Meeting.date == d,
+            Meeting.track_name == track,
+            Meeting.state == state,
+        )
+        .all()
+    )
+
+    if not rows:
+        return templates.TemplateResponse(
+            "meeting_social.html",
+            {
+                "request": request,
+                "track_name": track,
+                "meeting_date": d,
+                "races": [],
+                "summary": None,
+                "error": "No tips found for this meeting",
+            },
+        )
+
+    # 3) Group tips by race and determine results
+    race_data: Dict[int, Dict[str, Any]] = {}  # race_number -> race info
+
+    for tip, _outcome, race, meeting in rows:
+        race_no = race.race_number
+        if race_no not in race_data:
+            race_data[race_no] = {
+                "race_number": race_no,
+                "race_name": race.name,
+                "tips": [],
+                "winner": None,
+                "danger": None,
+                "positions": set(),  # for quinella/trifecta
+            }
+
+        # Determine tip's finishing position from RA results
+        ra_key = (
+            meeting.date,
+            (meeting.state or "").upper(),
+            race.race_number,
+            tip.tab_number,
+        )
+        candidates = ra_index.get(ra_key) or []
+        ra_row = None
+
+        if candidates:
+            mt_track = meeting.track_name or ""
+            if len(candidates) == 1:
+                ra_row = candidates[0]
+            else:
+                for cand in candidates:
+                    if _tracks_match(mt_track, cand.track):
+                        ra_row = cand
+                        break
+                if ra_row is None:
+                    ra_row = candidates[0]
+
+        finish_pos = None
+        if ra_row is not None:
+            if not getattr(ra_row, "is_scratched", False):
+                finish_pos = getattr(ra_row, "finishing_pos", None)
+
+        # Check if AI_BEST
+        is_ai_best = False
+        tip_type = tip.tip_type or ""
+        if tip_type.upper() in {"AI_BEST", "AI BEST", "BEST"}:
+            is_ai_best = True
+
+        tip_info = {
+            "tab_number": tip.tab_number,
+            "horse_name": tip.horse_name,
+            "tip_type": tip_type,
+            "reasoning": tip.reasoning,
+            "finish_pos": finish_pos,
+            "is_ai_best": is_ai_best,
+            "placed": finish_pos in (1, 2, 3) if finish_pos else False,
+        }
+
+        race_data[race_no]["tips"].append(tip_info)
+
+        # Track positions for quinella/trifecta
+        if finish_pos in (1, 2, 3):
+            race_data[race_no]["positions"].add(finish_pos)
+
+        # Determine winner (AI_BEST that won) and danger
+        if finish_pos == 1 and is_ai_best:
+            race_data[race_no]["winner"] = tip_info
+        elif finish_pos == 1 and tip_type.upper() == "DANGER":
+            # Danger won - show as winner but not starred
+            if race_data[race_no]["winner"] is None:
+                race_data[race_no]["winner"] = tip_info
+        elif tip_type.upper() == "DANGER":
+            race_data[race_no]["danger"] = tip_info
+
+    # 4) Sort races and compute summary stats
+    races_list = sorted(race_data.values(), key=lambda x: x["race_number"])
+
+    # Find AI_BEST winner per race if not already set
+    for race in races_list:
+        if race["winner"] is None:
+            # Check if any tip won
+            for tip_info in race["tips"]:
+                if tip_info["finish_pos"] == 1:
+                    race["winner"] = tip_info
+                    break
+
+    # Compute summary
+    total_tips = 0
+    total_wins = 0
+    ai_best_wins = 0
+    quinellas = 0
+    trifectas = 0
+
+    for race in races_list:
+        ai_best_count = sum(1 for t in race["tips"] if t["is_ai_best"])
+        total_tips += ai_best_count if ai_best_count > 0 else len(race["tips"])
+
+        # Count wins
+        for tip_info in race["tips"]:
+            if tip_info["finish_pos"] == 1:
+                total_wins += 1
+                if tip_info["is_ai_best"]:
+                    ai_best_wins += 1
+                break  # only count one winner per race
+
+        # Quinella: 1st and 2nd in our tips
+        if 1 in race["positions"] and 2 in race["positions"]:
+            quinellas += 1
+        # Trifecta: 1st, 2nd, 3rd in our tips
+        if 1 in race["positions"] and 2 in race["positions"] and 3 in race["positions"]:
+            trifectas += 1
+
+    # Quaddie check (last 4 races)
+    quaddie_hit = False
+    race_numbers = sorted(race_data.keys())
+    if len(race_numbers) >= 4:
+        last_4 = race_numbers[-4:]
+        quaddie_legs_hit = 0
+        for rn in last_4:
+            race = race_data[rn]
+            # Check if any of our tips won this race
+            for tip_info in race["tips"]:
+                if tip_info["finish_pos"] == 1:
+                    quaddie_legs_hit += 1
+                    break
+        quaddie_hit = quaddie_legs_hit == 4
+
+    summary = {
+        "tips": len(races_list),  # Number of races
+        "wins": total_wins,
+        "ai_best_wins": ai_best_wins,
+        "quinellas": quinellas,
+        "trifectas": trifectas,
+        "quaddie_hit": quaddie_hit,
+    }
+
+    return templates.TemplateResponse(
+        "meeting_social.html",
+        {
+            "request": request,
+            "track_name": track,
+            "meeting_date": d,
+            "races": races_list,
+            "summary": summary,
+        },
+    )
