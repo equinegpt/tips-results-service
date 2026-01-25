@@ -668,149 +668,141 @@ body {
 
 /* --- Jam's Data styles --- */
 
-.jams-track-card {
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  padding: 16px 20px;
-  margin-bottom: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.jams-track-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.jams-track-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.jams-stats {
-  display: flex;
-  gap: 16px;
-}
-
-.jams-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-}
-
-.jams-stat-value {
-  font-size: 20px;
+/* Highlight colors for summary stats */
+.jams-highlight-quin {
+  color: #60a5fa;
   font-weight: 600;
 }
 
-.jams-stat-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-}
-
-.jams-race-row {
-  display: grid;
-  grid-template-columns: 80px 1fr 1fr 140px;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border-soft);
-  align-items: center;
-}
-
-.jams-race-row:last-child {
-  border-bottom: none;
-}
-
-.jams-race-num {
+.jams-highlight-tri {
+  color: #c084fc;
   font-weight: 600;
-  font-size: 14px;
 }
 
-.jams-picks {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* Race card highlighting for exotics */
+.jams-race--quinella {
+  border-left: 3px solid #3b82f6 !important;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.08) 0%, transparent 50%);
 }
 
-.jams-pick {
-  font-size: 12px;
-  color: var(--muted);
+.jams-race--trifecta {
+  border-left: 3px solid #a855f7 !important;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.08) 0%, transparent 50%);
 }
 
-.jams-pick-type {
-  font-weight: 500;
-  min-width: 70px;
-  display: inline-block;
-}
-
-.jams-results {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.jams-result {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.jams-pos {
-  font-weight: 600;
-  min-width: 24px;
-}
-
-.jams-pos--1 {
-  color: #ffd700;
-}
-
-.jams-pos--2 {
-  color: #c0c0c0;
-}
-
-.jams-pos--3 {
-  color: #cd7f32;
-}
-
-.jams-exotic {
-  display: flex;
-  gap: 8px;
-}
-
-.jams-exotic-badge {
+/* Badges in race header */
+.jams-badge {
   padding: 4px 12px;
   border-radius: 999px;
   font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.jams-badge--quin {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid #3b82f6;
+  color: #93c5fd;
+}
+
+.jams-badge--tri {
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid #a855f7;
+  color: #d8b4fe;
+}
+
+/* Row highlighting for winners/placed */
+.jams-row--winner {
+  background: rgba(24, 203, 150, 0.15) !important;
+}
+
+.jams-row--placed {
+  background: rgba(251, 191, 36, 0.08) !important;
+}
+
+/* Placing badges */
+.jams-placing {
   font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.jams-placing--1 {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.15);
+}
+
+.jams-placing--2 {
+  color: #e5e5e5;
+  background: rgba(192, 192, 192, 0.15);
+}
+
+.jams-placing--3 {
+  color: #cd7f32;
+  background: rgba(205, 127, 50, 0.15);
+}
+
+/* Result badges */
+.jams-result-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.jams-exotic-badge--quin {
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.5);
-  color: #93c5fd;
+.jams-result-badge--win {
+  background: rgba(24, 203, 150, 0.2);
+  border: 1px solid #18cb96;
+  color: #6ee7b7;
 }
 
-.jams-exotic-badge--tri {
-  background: rgba(168, 85, 247, 0.15);
-  border: 1px solid rgba(168, 85, 247, 0.5);
-  color: #d8b4fe;
+.jams-result-badge--place {
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid #f59e0b;
+  color: #fcd34d;
 }
 
-.jams-ai-first {
+/* Exotic summary bar */
+.jams-exotic-summary {
+  padding: 10px 14px;
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.jams-exotic-item {
+  display: inline;
+}
+
+.jams-type--ai {
+  color: #6ee7b7;
+  font-weight: 600;
+}
+
+.jams-type--danger {
+  color: #fdba74;
+  font-weight: 600;
+}
+
+.jams-type--value {
+  color: #fdba74;
+  font-weight: 600;
+}
+
+.jams-ai-first-badge {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 3px 10px;
+  background: var(--accent);
+  color: #020617;
   font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  font-weight: 700;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
