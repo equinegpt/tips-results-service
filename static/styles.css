@@ -622,3 +622,195 @@ body {
 .result-icon--pending {
   opacity: 0.4;
 }
+
+/* --- Tab navigation (Day view) --- */
+
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  padding: 4px;
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn--active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content--active {
+  display: block;
+}
+
+/* --- Jam's Data styles --- */
+
+.jams-track-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.jams-track-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.jams-track-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.jams-stats {
+  display: flex;
+  gap: 16px;
+}
+
+.jams-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.jams-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.jams-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.jams-race-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr 140px;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-soft);
+  align-items: center;
+}
+
+.jams-race-row:last-child {
+  border-bottom: none;
+}
+
+.jams-race-num {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.jams-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jams-pick {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.jams-pick-type {
+  font-weight: 500;
+  min-width: 70px;
+  display: inline-block;
+}
+
+.jams-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jams-result {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jams-pos {
+  font-weight: 600;
+  min-width: 24px;
+}
+
+.jams-pos--1 {
+  color: #ffd700;
+}
+
+.jams-pos--2 {
+  color: #c0c0c0;
+}
+
+.jams-pos--3 {
+  color: #cd7f32;
+}
+
+.jams-exotic {
+  display: flex;
+  gap: 8px;
+}
+
+.jams-exotic-badge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.jams-exotic-badge--quin {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #93c5fd;
+}
+
+.jams-exotic-badge--tri {
+  background: rgba(168, 85, 247, 0.15);
+  border: 1px solid rgba(168, 85, 247, 0.5);
+  color: #d8b4fe;
+}
+
+.jams-ai-first {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}

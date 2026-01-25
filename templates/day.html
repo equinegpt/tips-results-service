@@ -44,6 +44,17 @@
     </div>
   </header>
 
+  {# -------------------- TAB NAVIGATION -------------------- #}
+  {% if meetings|length > 0 %}
+  <nav class="tab-nav">
+    <button type="button" class="tab-btn tab-btn--active" data-tab="day-view">Day View</button>
+    <button type="button" class="tab-btn" data-tab="jams-data">Jam's Data</button>
+  </nav>
+  {% endif %}
+
+  {# -------------------- DAY VIEW TAB -------------------- #}
+  <div id="day-view" class="tab-content tab-content--active">
+
   {# -------------------- DAY SUMMARY CARD -------------------- #}
   {% if meetings|length > 0 and day_summary is defined and day_summary %}
     {% set ds = day_summary %}
@@ -313,5 +324,128 @@
       </section>
     {% endfor %}
   {% endif %}
+
+  </div>{# end day-view tab #}
+
+  {# -------------------- JAM'S DATA TAB -------------------- #}
+  <div id="jams-data" class="tab-content">
+    {% if meetings|length > 0 %}
+
+      {# Day summary for Jam's Data #}
+      {% if day_summary is defined and day_summary %}
+        {% set ds = day_summary %}
+        <section class="jams-track-card">
+          <div class="jams-track-header">
+            <h2 class="jams-track-title">Day Summary – {{ display_date }}</h2>
+            <div class="jams-stats">
+              <div class="jams-stat">
+                <span class="jams-stat-value">{{ ds.get('wins', 0) }}/{{ ds.get('tips', 0) }}</span>
+                <span class="jams-stat-label">Winners</span>
+              </div>
+              <div class="jams-stat">
+                <span class="jams-stat-value">{{ ds.get('quinellas', 0) }}</span>
+                <span class="jams-stat-label">Quinellas</span>
+              </div>
+              <div class="jams-stat">
+                <span class="jams-stat-value">{{ ds.get('trifectas', 0) }}</span>
+                <span class="jams-stat-label">Trifectas</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      {% endif %}
+
+      {# Per-meeting breakdown #}
+      {% for m in meetings %}
+        {% set ms = m.summary if m.summary is defined else {} %}
+        <section class="jams-track-card">
+          <div class="jams-track-header">
+            <div>
+              <h2 class="jams-track-title">{{ m.meeting.track_name }}</h2>
+              <span class="state-pill">{{ m.meeting.state }}</span>
+            </div>
+            <div class="jams-stats">
+              <div class="jams-stat">
+                <span class="jams-stat-value">{{ ms.get('wins', 0) }}/{{ ms.get('tips', 0) }}</span>
+                <span class="jams-stat-label">Winners</span>
+              </div>
+              <div class="jams-stat">
+                <span class="jams-stat-value">{{ ms.get('quinellas', 0) }}</span>
+                <span class="jams-stat-label">Quinellas</span>
+              </div>
+              <div class="jams-stat">
+                <span class="jams-stat-value">{{ ms.get('trifectas', 0) }}</span>
+                <span class="jams-stat-label">Trifectas</span>
+              </div>
+            </div>
+          </div>
+
+          {# Race-by-race breakdown #}
+          {% for r in m.races %}
+            <div class="jams-race-row">
+              <div class="jams-race-num">Race {{ r.race_number }}</div>
+
+              {# AI Picks column #}
+              <div class="jams-picks">
+                {% for t in r.tips %}
+                  <div class="jams-pick">
+                    <span class="jams-pick-type">{{ t.tip_type }}:</span>
+                    #{{ t.tab_number }} {{ t.horse }}
+                  </div>
+                {% endfor %}
+              </div>
+
+              {# Results column - show placings for our tips #}
+              <div class="jams-results">
+                {% for ex in r.exotics_order %}
+                  <div class="jams-result">
+                    <span class="jams-pos jams-pos--{{ ex.placing }}">{{ ex.placing }}{{ 'st' if ex.placing == 1 else ('nd' if ex.placing == 2 else 'rd') }}</span>
+                    <span>{{ ex.tip_type }}: #{{ ex.tab_number }} {{ ex.horse }}</span>
+                  </div>
+                {% else %}
+                  <div class="jams-result" style="color: var(--muted);">No top 3 placings</div>
+                {% endfor %}
+              </div>
+
+              {# Exotic badges #}
+              <div class="jams-exotic">
+                {% if r.has_trifecta %}
+                  <span class="jams-exotic-badge jams-exotic-badge--tri">Trifecta</span>
+                  {% if r.exotics_order|length > 0 and r.exotics_order[0].tip_type == 'AI_BEST' %}
+                    <span class="jams-ai-first">AI 1st</span>
+                  {% endif %}
+                {% elif r.has_quinella %}
+                  <span class="jams-exotic-badge jams-exotic-badge--quin">Quinella</span>
+                  {% if r.exotics_order|length > 0 and r.exotics_order[0].tip_type == 'AI_BEST' %}
+                    <span class="jams-ai-first">AI 1st</span>
+                  {% endif %}
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </section>
+      {% endfor %}
+
+    {% else %}
+      <p class="empty-state">No data available for this date.</p>
+    {% endif %}
+  </div>{# end jams-data tab #}
+
 </main>
+
+<script>
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Remove active from all tabs and content
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-btn--active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('tab-content--active'));
+
+      // Activate clicked tab
+      btn.classList.add('tab-btn--active');
+      const tabId = btn.dataset.tab;
+      document.getElementById(tabId).classList.add('tab-content--active');
+    });
+  });
+</script>
 {% endblock %}

@@ -286,10 +286,13 @@ def _build_day_page_context(
             if value_placing is not None:
                 placings_for_quinella.append(value_placing)
 
+            has_quinella = False
             if 1 in placings_for_quinella and 2 in placings_for_quinella:
+                has_quinella = True
                 mt_stats["quinellas"] += 1
 
             # Trifecta: AI_BEST, DANGER & VALUE fill 1st/2nd/3rd in any order
+            has_trifecta = False
             if (
                 ai_best_placing is not None
                 and danger_placing is not None
@@ -302,7 +305,20 @@ def _build_day_page_context(
                 }
                 # Require exactly 1,2,3 as a set
                 if trifecta_positions == {1, 2, 3}:
+                    has_trifecta = True
                     mt_stats["trifectas"] += 1
+
+            # Build exotics order: sorted list of (placing, tip_type, horse) for Jam's Data
+            exotics_order = []
+            for tip_row in tips_rows:
+                if tip_row["placing"] is not None and tip_row["placing"] <= 3:
+                    exotics_order.append({
+                        "placing": tip_row["placing"],
+                        "tip_type": tip_row["tip_type"],
+                        "horse": tip_row["horse"],
+                        "tab_number": tip_row["tab_number"],
+                    })
+            exotics_order.sort(key=lambda x: x["placing"])
 
             races_block.append(
                 {
@@ -310,6 +326,9 @@ def _build_day_page_context(
                     "race_name": race.name,
                     "distance_m": race.distance_m,
                     "tips": tips_rows,
+                    "has_quinella": has_quinella,
+                    "has_trifecta": has_trifecta,
+                    "exotics_order": exotics_order,
                 }
             )
 
