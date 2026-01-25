@@ -448,3 +448,17 @@ def ui_day_mobile(
     """
     ctx = _build_day_page_context(request, meeting_date, db)
     return templates.TemplateResponse("day_mobile.html", ctx)
+
+
+@router.get("/ui/jams-data", response_class=HTMLResponse)
+def ui_jams_data(
+    request: Request,
+    meeting_date: date_type = Query(default_factory=today_mel, alias="date"),
+    db: Session = Depends(get_db),
+):
+    """
+    Jam's Data view: summary per track showing AI picks vs results,
+    with quinella/trifecta details and finishing order.
+    """
+    ctx = _build_day_page_context(request, meeting_date, db)
+    return templates.TemplateResponse("jams_data.html", ctx)
