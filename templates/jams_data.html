@@ -7,37 +7,23 @@
 {% block body %}
 <main class="page-root">
 
-  {# Top header: logo + title + date picker #}
+  {# Top header #}
   <header class="page-header">
     <div class="page-header-left">
       <div class="brand-lockup">
-        <img
-          src="{{ url_for('static', path='stablfy-logo.png') }}"
-          alt="Stablfy"
-          class="brand-logo"
-        />
+        <img src="{{ url_for('static', path='stablfy-logo.png') }}" alt="Stablfy" class="brand-logo" />
         <div class="brand-text">
-          <div class="brand-title">
-            Jam's Data – {{ date.strftime("%A %d %B %Y") }}
-          </div>
-          <div class="brand-subtitle">
-            Tips Results Service
-          </div>
+          <div class="brand-title">Jam's Data – {{ date.strftime("%A %d %B %Y") }}</div>
+          <div class="brand-subtitle">Tips Results Service</div>
         </div>
       </div>
     </div>
-
     <div class="page-header-right">
       <form class="date-form" method="get" action="/ui/jams-data">
         <span class="date-form-label">Date</span>
         <div class="date-form-input-wrap">
           <span class="date-form-icon">📅</span>
-          <input
-            type="date"
-            id="date"
-            name="date"
-            value="{{ date.isoformat() }}"
-          />
+          <input type="date" id="date" name="date" value="{{ date.isoformat() }}" />
         </div>
         <button type="submit" class="btn-go">Go</button>
       </form>
@@ -46,7 +32,7 @@
 
   {% if meetings|length > 0 %}
 
-    {# Day summary card #}
+    {# Day summary #}
     {% if day_summary is defined and day_summary %}
       {% set ds = day_summary %}
       <section class="meeting-card meeting-card--summary">
@@ -54,7 +40,6 @@
           <div class="meeting-header-left">
             <div class="meeting-title-block">
               <h2 class="meeting-title">Day Summary</h2>
-              <div class="meeting-meta">{{ display_date }}</div>
             </div>
           </div>
         </div>
@@ -62,7 +47,7 @@
           <div class="summary-grid">
             <div class="summary-item">
               <div class="summary-label">Winners</div>
-              <div class="summary-value">{{ ds.get('wins', 0) }} / {{ ds.get('tips', 0) }}</div>
+              <div class="summary-value summary-value--good">{{ ds.get('wins', 0) }} / {{ ds.get('tips', 0) }}</div>
             </div>
             <div class="summary-item">
               <div class="summary-label">Strike Rate</div>
@@ -91,27 +76,33 @@
               <div class="meeting-title-row">
                 <h2 class="meeting-title">{{ m.meeting.track_name }}</h2>
                 <span class="state-pill">{{ m.meeting.state }}</span>
+                {% if ms.get('quinellas', 0) > 0 %}
+                  <span class="jams-badge jams-badge--quin">{{ ms.get('quinellas', 0) }} QUIN</span>
+                {% endif %}
+                {% if ms.get('trifectas', 0) > 0 %}
+                  <span class="jams-badge jams-badge--tri">{{ ms.get('trifectas', 0) }} TRI</span>
+                {% endif %}
               </div>
               <div class="meeting-meta">
                 {{ ms.get('wins', 0) }} winners from {{ ms.get('tips', 0) }} tips
-                {% if ms.get('quinellas', 0) > 0 %} · <span class="jams-highlight-quin">{{ ms.get('quinellas', 0) }} Quinella{{ 's' if ms.get('quinellas', 0) > 1 else '' }}</span>{% endif %}
-                {% if ms.get('trifectas', 0) > 0 %} · <span class="jams-highlight-tri">{{ ms.get('trifectas', 0) }} Trifecta{{ 's' if ms.get('trifectas', 0) > 1 else '' }}</span>{% endif %}
               </div>
             </div>
           </div>
         </div>
 
         <div class="meeting-body">
-          {# Race table #}
           {% for r in m.races %}
             {% set exotics = r.get('exotics_order', []) %}
             {% set has_tri = r.get('has_trifecta', false) %}
             {% set has_quin = r.get('has_quinella', false) %}
+            {% set has_winner = r.tips | selectattr('placing', 'equalto', 1) | list | length > 0 %}
 
+            {# Only show races with a winner or exotic #}
+            {% if has_winner or has_tri or has_quin %}
             <div class="race-card {% if has_tri %}jams-race--trifecta{% elif has_quin %}jams-race--quinella{% endif %}">
               <div class="race-header">
                 <div class="race-header-left">
-                  <div class="race-title">Race {{ r.race_number }}</div>
+                  <div class="race-title">Race {{ r.race_number }}{% if r.race_name %} – {{ r.race_name }}{% endif %}</div>
                 </div>
                 <div class="race-header-right">
                   {% if has_tri %}
@@ -128,7 +119,7 @@
                     <th style="width: 100px;">Type</th>
                     <th style="width: 60px;">TAB</th>
                     <th>Horse</th>
-                    <th style="width: 80px;">Finished</th>
+                    <th style="width: 70px;">Pos</th>
                     <th style="width: 80px;">Result</th>
                   </tr>
                 </thead>
@@ -142,7 +133,7 @@
                           <span class="pill pill-ai-best">AI BEST</span>
                         {% elif t.tip_type == "DANGER" %}
                           <span class="pill pill-danger">DANGER</span>
-                        {% elif t.tip_type == "VALUE" %}
+                        {% else %}
                           <span class="pill pill-danger">VALUE</span>
                         {% endif %}
                       </td>
@@ -154,7 +145,7 @@
                             {{ t.placing }}{{ 'st' if t.placing == 1 else ('nd' if t.placing == 2 else ('rd' if t.placing == 3 else 'th')) }}
                           </span>
                         {% else %}
-                          <span style="color: var(--muted);">–</span>
+                          –
                         {% endif %}
                       </td>
                       <td>
@@ -162,10 +153,8 @@
                           <span class="jams-result-badge jams-result-badge--win">WIN</span>
                         {% elif t.placing == 2 or t.placing == 3 %}
                           <span class="jams-result-badge jams-result-badge--place">PLACE</span>
-                        {% elif t.placing %}
-                          <span style="color: var(--muted);">–</span>
                         {% else %}
-                          <span style="color: var(--muted);">–</span>
+                          –
                         {% endif %}
                       </td>
                     </tr>
@@ -173,17 +162,13 @@
                 </tbody>
               </table>
 
-              {# Exotic result summary #}
               {% if has_tri or has_quin %}
                 <div class="jams-exotic-summary">
-                  <strong>{{ 'Trifecta' if has_tri else 'Quinella' }} Order:</strong>
+                  <strong>{{ 'Trifecta' if has_tri else 'Quinella' }}:</strong>
                   {% for ex in exotics %}
-                    <span class="jams-exotic-item">
-                      {{ ex.placing }}{{ 'st' if ex.placing == 1 else ('nd' if ex.placing == 2 else 'rd') }}
-                      <span class="{% if ex.tip_type == 'AI_BEST' %}jams-type--ai{% elif ex.tip_type == 'DANGER' %}jams-type--danger{% else %}jams-type--value{% endif %}">{{ ex.tip_type }}</span>
-                      (#{{ ex.tab_number }} {{ ex.horse }})
-                    </span>
-                    {% if not loop.last %} → {% endif %}
+                    {{ ex.placing }}{{ 'st' if ex.placing == 1 else ('nd' if ex.placing == 2 else 'rd') }}
+                    <span class="{% if ex.tip_type == 'AI_BEST' %}jams-type--ai{% else %}jams-type--danger{% endif %}">{{ ex.tip_type }}</span>
+                    ({{ ex.horse }}){% if not loop.last %} → {% endif %}
                   {% endfor %}
                   {% if exotics|length > 0 and exotics[0].tip_type == 'AI_BEST' %}
                     <span class="jams-ai-first-badge">AI LED!</span>
@@ -191,6 +176,7 @@
                 </div>
               {% endif %}
             </div>
+            {% endif %}
           {% endfor %}
         </div>
       </section>

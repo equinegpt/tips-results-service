@@ -671,108 +671,106 @@ body {
 /* Highlight colors for summary stats */
 .jams-highlight-quin {
   color: #60a5fa;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .jams-highlight-tri {
   color: #c084fc;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* Race card highlighting for exotics */
-.jams-race--quinella {
-  border-left: 3px solid #3b82f6 !important;
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.08) 0%, transparent 50%);
+.race-card.jams-race--quinella {
+  border: 2px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
 }
 
-.jams-race--trifecta {
-  border-left: 3px solid #a855f7 !important;
-  background: linear-gradient(90deg, rgba(168, 85, 247, 0.08) 0%, transparent 50%);
+.race-card.jams-race--trifecta {
+  border: 2px solid #a855f7;
+  background: rgba(168, 85, 247, 0.1);
 }
 
 /* Badges in race header */
 .jams-badge {
-  padding: 4px 12px;
+  padding: 6px 16px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
 .jams-badge--quin {
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid #3b82f6;
-  color: #93c5fd;
+  background: #3b82f6;
+  color: #fff;
 }
 
 .jams-badge--tri {
-  background: rgba(168, 85, 247, 0.2);
-  border: 1px solid #a855f7;
-  color: #d8b4fe;
+  background: #a855f7;
+  color: #fff;
 }
 
-/* Row highlighting for winners/placed */
-.jams-row--winner {
-  background: rgba(24, 203, 150, 0.15) !important;
+/* Row highlighting for winners/placed - STRONG colors */
+.race-table tbody tr.jams-row--winner {
+  background: rgba(24, 203, 150, 0.25);
 }
 
-.jams-row--placed {
-  background: rgba(251, 191, 36, 0.08) !important;
+.race-table tbody tr.jams-row--winner td {
+  color: #fff;
+  font-weight: 500;
 }
 
-/* Placing badges */
+.race-table tbody tr.jams-row--placed {
+  background: rgba(251, 191, 36, 0.12);
+}
+
+/* Placing display */
 .jams-placing {
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-weight: 700;
+  font-size: 13px;
 }
 
 .jams-placing--1 {
   color: #ffd700;
-  background: rgba(255, 215, 0, 0.15);
 }
 
 .jams-placing--2 {
-  color: #e5e5e5;
-  background: rgba(192, 192, 192, 0.15);
+  color: #c0c0c0;
 }
 
 .jams-placing--3 {
   color: #cd7f32;
-  background: rgba(205, 127, 50, 0.15);
 }
 
-/* Result badges */
+/* Result badges - bolder */
 .jams-result-badge {
-  padding: 3px 10px;
+  padding: 4px 12px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
 }
 
 .jams-result-badge--win {
-  background: rgba(24, 203, 150, 0.2);
-  border: 1px solid #18cb96;
-  color: #6ee7b7;
+  background: #18cb96;
+  color: #000;
 }
 
 .jams-result-badge--place {
-  background: rgba(251, 191, 36, 0.15);
-  border: 1px solid #f59e0b;
-  color: #fcd34d;
+  background: #f59e0b;
+  color: #000;
 }
 
-/* Exotic summary bar */
+/* Exotic summary bar - more prominent */
 .jams-exotic-summary {
-  padding: 10px 14px;
-  margin-top: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 12px 16px;
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
+  border-left: 3px solid var(--accent);
 }
 
 .jams-exotic-item {
@@ -780,29 +778,29 @@ body {
 }
 
 .jams-type--ai {
-  color: #6ee7b7;
-  font-weight: 600;
+  color: #4ade80;
+  font-weight: 700;
 }
 
 .jams-type--danger {
-  color: #fdba74;
-  font-weight: 600;
+  color: #fb923c;
+  font-weight: 700;
 }
 
 .jams-type--value {
-  color: #fdba74;
-  font-weight: 600;
+  color: #fb923c;
+  font-weight: 700;
 }
 
 .jams-ai-first-badge {
   display: inline-block;
   margin-left: 12px;
-  padding: 3px 10px;
-  background: var(--accent);
-  color: #020617;
-  font-size: 10px;
+  padding: 4px 12px;
+  background: #4ade80;
+  color: #000;
+  font-size: 11px;
   font-weight: 700;
   border-radius: 999px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
 }
