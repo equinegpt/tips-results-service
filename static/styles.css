@@ -822,5 +822,39 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 120px;
+}
+
+/* Jams Data table column widths */
+.jams-table {
+  table-layout: fixed;
+}
+
+.jams-table .col-type {
+  width: 90px;
+}
+
+.jams-table .col-tab {
+  width: 55px;
+}
+
+.jams-table .col-horse {
+  width: 22%;
+}
+
+.jams-table .col-trainer {
+  width: 18%;
+}
+
+.jams-table .col-jockey {
+  width: 18%;
+}
+
+.jams-table .col-pos {
+  width: 55px;
+  text-align: center;
+}
+
+.jams-table .col-result {
+  width: 80px;
+  text-align: center;
 }

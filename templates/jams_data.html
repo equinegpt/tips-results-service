@@ -123,16 +123,16 @@
                 </div>
               </div>
 
-              <table class="race-table">
+              <table class="race-table jams-table">
                 <thead>
                   <tr>
-                    <th style="width: 90px;">Type</th>
-                    <th style="width: 50px;">TAB</th>
-                    <th>Horse</th>
-                    <th style="width: 120px;">Trainer</th>
-                    <th style="width: 120px;">Jockey</th>
-                    <th style="width: 50px;">Pos</th>
-                    <th style="width: 70px;">Result</th>
+                    <th class="col-type">Type</th>
+                    <th class="col-tab">TAB</th>
+                    <th class="col-horse">Horse</th>
+                    <th class="col-trainer">Trainer</th>
+                    <th class="col-jockey">Jockey</th>
+                    <th class="col-pos">Pos</th>
+                    <th class="col-result">Result</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -140,7 +140,7 @@
                     {% set is_winner = t.placing == 1 %}
                     {% set is_placed = t.placing is not none and t.placing <= 3 %}
                     <tr class="{% if is_winner %}jams-row--winner{% elif is_placed %}jams-row--placed{% endif %}">
-                      <td>
+                      <td class="col-type">
                         {% if t.tip_type == "AI_BEST" %}
                           <span class="pill pill-ai-best">AI BEST</span>
                         {% elif t.tip_type == "DANGER" %}
@@ -149,11 +149,11 @@
                           <span class="pill pill-danger">VALUE</span>
                         {% endif %}
                       </td>
-                      <td>#{{ t.tab_number }}</td>
-                      <td>{{ t.horse }}</td>
-                      <td class="jams-meta-cell">{{ t.trainer or '–' }}</td>
-                      <td class="jams-meta-cell">{{ t.jockey or '–' }}</td>
-                      <td>
+                      <td class="col-tab">#{{ t.tab_number }}</td>
+                      <td class="col-horse">{{ t.horse }}</td>
+                      <td class="col-trainer jams-meta-cell">{{ t.trainer or '–' }}</td>
+                      <td class="col-jockey jams-meta-cell">{{ t.jockey or '–' }}</td>
+                      <td class="col-pos">
                         {% if t.placing %}
                           <span class="jams-placing jams-placing--{{ t.placing }}">
                             {{ t.placing }}{{ 'st' if t.placing == 1 else ('nd' if t.placing == 2 else ('rd' if t.placing == 3 else 'th')) }}
@@ -162,7 +162,7 @@
                           –
                         {% endif %}
                       </td>
-                      <td>
+                      <td class="col-result">
                         {% if is_winner %}
                           <span class="jams-result-badge jams-result-badge--win">WIN</span>
                         {% elif t.placing == 2 or t.placing == 3 %}
