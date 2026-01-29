@@ -1,4 +1,5 @@
 # app/routes_ui.py
+import re
 from datetime import date as date_type
 from typing import Any, Optional, Dict, List, Tuple
 
@@ -287,6 +288,9 @@ def _build_day_page_context(
                         trainer = rr.trainer
                     if jockey is None and hasattr(rr, "jockey"):
                         jockey = rr.jockey
+                # Strip apprentice details from jockey name e.g. "(a3/51kg)"
+                if jockey:
+                    jockey = re.sub(r"\s*\([^)]*\)\s*$", "", jockey).strip()
 
                 tips_rows.append(
                     {

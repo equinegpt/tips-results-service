@@ -176,19 +176,6 @@
                 </tbody>
               </table>
 
-              {% if has_tri or has_quin %}
-                <div class="jams-exotic-summary">
-                  <strong>{{ 'Trifecta' if has_tri else 'Quinella' }}:</strong>
-                  {% for ex in exotics %}
-                    {{ ex.placing }}{{ 'st' if ex.placing == 1 else ('nd' if ex.placing == 2 else 'rd') }}
-                    <span class="{% if ex.tip_type == 'AI_BEST' %}jams-type--ai{% else %}jams-type--danger{% endif %}">{{ ex.tip_type }}</span>
-                    ({{ ex.horse }}){% if not loop.last %} → {% endif %}
-                  {% endfor %}
-                  {% if exotics|length > 0 and exotics[0].tip_type == 'AI_BEST' %}
-                    <span class="jams-ai-first-badge">AI LED!</span>
-                  {% endif %}
-                </div>
-              {% endif %}
             </div>
             {% endif %}
           {% endfor %}
