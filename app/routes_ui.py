@@ -107,17 +107,28 @@ def _build_day_page_context(
         ra_rows = []
 
     class _RAStub:
-        __slots__ = ("finish_position", "starting_price", "provider")
+        __slots__ = ("finish_position", "starting_price", "provider", "trainer", "jockey")
 
-        def __init__(self, finish_position, starting_price, provider: str):
+        def __init__(self, finish_position, starting_price, provider: str, trainer=None, jockey=None):
             self.finish_position = finish_position
             self.starting_price = starting_price
             self.provider = provider
+            self.trainer = trainer
+            self.jockey = jockey
+
+    # Also build a trainer/jockey index from RA data
+    trainer_jockey_index: dict[tuple, dict[str, str]] = {}
 
     for ra in ra_rows:
         track = (ra.track or "").strip()
         state = (ra.state or "").strip().upper()
         key = (track, state, ra.race_no, ra.tab_number)
+
+        # Store trainer/jockey for all RA rows
+        trainer_jockey_index[key] = {
+            "trainer": ra.trainer,
+            "jockey": ra.jockey,
+        }
 
         # Never override an existing result (especially PF)
         if key in race_results_index:
@@ -127,6 +138,8 @@ def _build_day_page_context(
             finish_position=ra.finishing_pos,
             starting_price=ra.starting_price,
             provider="RA",
+            trainer=ra.trainer,
+            jockey=ra.jockey,
         )
 
     print(f"[UI] race_results_index size after RA fallback = {len(race_results_index)}")
@@ -179,6 +192,7 @@ def _build_day_page_context(
         "return": 0.0,
         "quinellas": 0,
         "trifectas": 0,
+        "quaddies": 0,
     }
 
     for tr in tip_runs:
@@ -263,6 +277,17 @@ def _build_day_page_context(
                     f"placing={placing}, result={result}, sp={sp}"
                 )
 
+                # Get trainer/jockey from index
+                tj_data = trainer_jockey_index.get(rr_key, {})
+                trainer = tj_data.get("trainer")
+                jockey = tj_data.get("jockey")
+                # Also check if rr has trainer/jockey (from _RAStub)
+                if rr is not None:
+                    if trainer is None and hasattr(rr, "trainer"):
+                        trainer = rr.trainer
+                    if jockey is None and hasattr(rr, "jockey"):
+                        jockey = rr.jockey
+
                 tips_rows.append(
                     {
                         "id": tip.id,
@@ -274,6 +299,8 @@ def _build_day_page_context(
                         "placing": placing,   # ← maps finish_position
                         "result": result,     # ← WIN/PLACE/LOSE
                         "sp": sp,             # ← starting_price
+                        "trainer": trainer,   # ← trainer name
+                        "jockey": jockey,     # ← jockey name
                     }
                 )
 
@@ -335,6 +362,21 @@ def _build_day_page_context(
         if not races_block:
             continue
 
+        # Calculate Quaddie: last 4 races of the meeting, all must have a winner
+        quaddie_hit = False
+        quaddie_legs = 0
+        if len(races_block) >= 4:
+            last_4_races = sorted(races_block, key=lambda r: r["race_number"])[-4:]
+            quaddie_legs = 0
+            for race_data in last_4_races:
+                # Check if any tip in this race won (placing == 1)
+                race_has_winner = any(
+                    t.get("placing") == 1 for t in race_data.get("tips", [])
+                )
+                if race_has_winner:
+                    quaddie_legs += 1
+            quaddie_hit = (quaddie_legs == 4)
+
         # Finalise meeting summary
         mt_tips = mt_stats["tips"]
         mt_wins = mt_stats["wins"]
@@ -355,6 +397,8 @@ def _build_day_page_context(
             "pnl": mt_pnl,
             "quinellas": mt_quin,
             "trifectas": mt_trif,
+            "quaddie_hit": quaddie_hit,
+            "quaddie_legs": quaddie_legs,
         }
 
         print(
@@ -371,6 +415,8 @@ def _build_day_page_context(
         day_totals["return"] += mt_return
         day_totals["quinellas"] += mt_quin
         day_totals["trifectas"] += mt_trif
+        if quaddie_hit:
+            day_totals["quaddies"] += 1
 
         meetings_data.append(
             {
@@ -405,6 +451,7 @@ def _build_day_page_context(
         "pnl": day_pnl,
         "quinellas": day_totals["quinellas"],
         "trifectas": day_totals["trifectas"],
+        "quaddies": day_totals["quaddies"],
     }
 
     print(

@@ -710,6 +710,16 @@ body {
   color: #fff;
 }
 
+.jams-badge--quaddie {
+  background: #f59e0b;
+  color: #000;
+}
+
+.jams-highlight-quaddie {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
 /* Row highlighting for winners/placed - STRONG colors */
 .race-table tbody tr.jams-row--winner {
   background: rgba(24, 203, 150, 0.25);
@@ -803,4 +813,14 @@ body {
   border-radius: 999px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* Trainer/Jockey cells */
+.jams-meta-cell {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
 }

@@ -21,6 +21,8 @@ class RAResultRow:
     is_scratched: bool
     margin_lens: Optional[float]
     starting_price: Optional[float]
+    trainer: Optional[str] = None
+    jockey: Optional[str] = None
 
 class RAResultsClient:
     """
@@ -114,6 +116,9 @@ class RAResultsClient:
                 or f"#{tab_number}"
             )
 
+            trainer = item.get("trainer") or item.get("trainerName") or None
+            jockey = item.get("jockey") or item.get("jockeyName") or None
+
             rows.append(
                 RAResultRow(
                     meeting_date=d,
@@ -126,6 +131,8 @@ class RAResultsClient:
                     is_scratched=is_scratched,
                     margin_lens=margin_lens,
                     starting_price=starting_price,
+                    trainer=trainer,
+                    jockey=jockey,
                 )
             )
 

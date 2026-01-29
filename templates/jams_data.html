@@ -61,6 +61,10 @@
               <div class="summary-label">Trifectas</div>
               <div class="summary-value jams-highlight-tri">{{ ds.get('trifectas', 0) }}</div>
             </div>
+            <div class="summary-item">
+              <div class="summary-label">Quaddies</div>
+              <div class="summary-value jams-highlight-quaddie">{{ ds.get('quaddies', 0) }}</div>
+            </div>
           </div>
         </div>
       </section>
@@ -76,6 +80,9 @@
               <div class="meeting-title-row">
                 <h2 class="meeting-title">{{ m.meeting.track_name }}</h2>
                 <span class="state-pill">{{ m.meeting.state }}</span>
+                {% if ms.get('quaddie_hit', false) %}
+                  <span class="jams-badge jams-badge--quaddie">QUADDIE</span>
+                {% endif %}
                 {% if ms.get('quinellas', 0) > 0 %}
                   <span class="jams-badge jams-badge--quin">{{ ms.get('quinellas', 0) }} QUIN</span>
                 {% endif %}
@@ -85,6 +92,9 @@
               </div>
               <div class="meeting-meta">
                 {{ ms.get('wins', 0) }} winners from {{ ms.get('tips', 0) }} tips
+                {% if ms.get('quaddie_legs', 0) > 0 and not ms.get('quaddie_hit', false) %}
+                  · Quaddie {{ ms.get('quaddie_legs', 0) }}/4
+                {% endif %}
               </div>
             </div>
           </div>
@@ -116,11 +126,13 @@
               <table class="race-table">
                 <thead>
                   <tr>
-                    <th style="width: 100px;">Type</th>
-                    <th style="width: 60px;">TAB</th>
+                    <th style="width: 90px;">Type</th>
+                    <th style="width: 50px;">TAB</th>
                     <th>Horse</th>
-                    <th style="width: 70px;">Pos</th>
-                    <th style="width: 80px;">Result</th>
+                    <th style="width: 120px;">Trainer</th>
+                    <th style="width: 120px;">Jockey</th>
+                    <th style="width: 50px;">Pos</th>
+                    <th style="width: 70px;">Result</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -139,6 +151,8 @@
                       </td>
                       <td>#{{ t.tab_number }}</td>
                       <td>{{ t.horse }}</td>
+                      <td class="jams-meta-cell">{{ t.trainer or '–' }}</td>
+                      <td class="jams-meta-cell">{{ t.jockey or '–' }}</td>
                       <td>
                         {% if t.placing %}
                           <span class="jams-placing jams-placing--{{ t.placing }}">
