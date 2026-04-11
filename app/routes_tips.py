@@ -465,6 +465,24 @@ def cron_generate_meeting_tips(
         )
 
     meeting = payload.meeting
+
+    # Skip if tips already exist for this meeting
+    if _meeting_has_tips(
+        db=db,
+        meeting_date=meeting.date,
+        track_name=meeting.track_name,
+        state=meeting.state,
+        pf_meeting_id=getattr(meeting, "pf_meeting_id", None),
+    ):
+        print(
+            f"[CRON] (single) SKIPPING {meeting.track_name} ({meeting.state}) "
+            f"on {meeting.date} - tips already exist"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Tips already exist for {meeting.track_name} ({meeting.state}) on {meeting.date}",
+        )
+
     tip_run_in = payload.tip_run
     races_entries: list[dict[str, Any]] = []
 
