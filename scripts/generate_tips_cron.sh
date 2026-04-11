@@ -29,6 +29,7 @@ if [ -z "${TARGET_DATE:-}" ]; then
     || TZ="Australia/Melbourne" date -v+1d +%F 2>/dev/null \
     || date -u -d "tomorrow" +%F)
 fi
+export TARGET_DATE
 
 echo "============================================"
 echo "[CRON] Tips generation for ${TARGET_DATE}"
@@ -52,31 +53,50 @@ fi
 # Extract unique meetings: meetingId, track, state, type
 # Filter to M (Metro) and P (Provincial) only — same as generate-daily-tips
 MEETINGS=$(echo "$RACES_JSON" | python3 -c "
-import json, sys
+import json, sys, os
 
+target_date = os.environ.get('TARGET_DATE', '')
 races = json.load(sys.stdin)
-seen = {}
+
+# Filter to target date (RA crawler returns all dates)
+if target_date:
+    races = [r for r in races if r.get('date') == target_date]
+
+# Group races by meetingId
+meetings = {}
 for r in races:
     mid = r.get('meetingId')
     if not mid:
         continue
-    track = r.get('track', '')
-    state = r.get('state', '')
-    rtype = (r.get('type') or '').upper()
-    key = f'{mid}'
-    if key not in seen:
-        seen[key] = {
+    if mid not in meetings:
+        meetings[mid] = {
             'meetingId': mid,
-            'track': track,
-            'state': state,
-            'type': rtype,
+            'track': r.get('track', ''),
+            'state': r.get('state', ''),
+            'type': (r.get('type') or '').upper(),
+            'races': [],
         }
+    meetings[mid]['races'].append(r)
 
-# Filter: Metro and Provincial only (same rules as daily_generator)
-filtered = [m for m in seen.values() if m['type'] in ('M', 'P')]
+# Filter: same rules as daily_generator
+# - Always include Metro (M) and Provincial (P)
+# - Include Country (C) only if it has a Maiden with prize > 29k
+BIG_MAIDEN_THRESHOLD = 29000
+filtered = []
+for m in meetings.values():
+    if m['type'] in ('M', 'P'):
+        filtered.append(m)
+    elif m['type'] == 'C':
+        has_big_maiden = any(
+            (r.get('class') or '').lower().startswith('maiden')
+            and (r.get('prize') or 0) > BIG_MAIDEN_THRESHOLD
+            for r in m['races']
+        )
+        if has_big_maiden:
+            filtered.append(m)
 
-# Sort: Metro first, then Provincial, then by track name
-order = {'M': 0, 'P': 1}
+# Sort: Metro first, then Provincial, then Country, then by track name
+order = {'M': 0, 'P': 1, 'C': 2}
 filtered.sort(key=lambda m: (order.get(m['type'], 9), m['track']))
 
 for m in filtered:
@@ -84,12 +104,12 @@ for m in filtered:
 ")
 
 if [ -z "$MEETINGS" ]; then
-  echo "[CRON] No Metro/Provincial meetings found for ${TARGET_DATE}. Exiting."
+  echo "[CRON] No eligible meetings found for ${TARGET_DATE}. Exiting."
   exit 0
 fi
 
 TOTAL=$(echo "$MEETINGS" | wc -l | tr -d ' ')
-echo "[CRON] Found ${TOTAL} Metro/Provincial meetings"
+echo "[CRON] Found ${TOTAL} eligible meetings (M + P + Country with big Maiden)"
 echo ""
 
 # ------------------------------------------------------------------
