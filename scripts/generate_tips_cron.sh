@@ -17,7 +17,8 @@
 #   PROJECT_ID    - iReel project ID (required)
 #   TARGET_DATE   - override date (default: tomorrow in Melbourne time)
 # ---------------------------------------------------------------------------
-set -euo pipefail
+set -uo pipefail
+# NOTE: no -e — we don't want one failed meeting to kill the whole run
 
 TRS="${TRS_BASE_URL:-https://tips-results-service.onrender.com}"
 RA="${RA_BASE_URL:-https://ra-crawler.onrender.com}"
@@ -126,7 +127,7 @@ while IFS='|' read -r MEETING_ID TRACK STATE TYPE; do
   HTTP_CODE=$(curl -s -o /tmp/trs_response.json -w "%{http_code}" \
     -X POST \
     "${TRS}/cron/generate-meeting-tips?date=${TARGET_DATE}&pf_meeting_id=${MEETING_ID}&project_id=${PROJECT_ID}" \
-    --max-time 120)
+    --max-time 300)
 
   if [ "$HTTP_CODE" = "200" ]; then
     RACE_COUNT=$(python3 -c "
