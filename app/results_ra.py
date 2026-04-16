@@ -103,87 +103,70 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
     Main entrypoint: fetch RA results from crawler for `target_date` and
     upsert into RaceResult (and, if necessary, Meeting/Race).
 
+    Uses RAResultsClient which handles the flat array format from RA Crawler.
+
     Returns the number of RaceResult rows inserted/updated.
     """
-    meetings_json = _fetch_ra_results_from_crawler(target_date)
-    if not meetings_json:
+    from .ra_results_client import RAResultsClient
+
+    client = RAResultsClient()
+    try:
+        ra_rows = client.fetch_results_for_date(target_date)
+    except Exception as e:
+        print(f"[RA] error fetching results: {e}")
+        return 0
+    finally:
+        client.close()
+
+    if not ra_rows:
         print(f"[RA] no results returned for {target_date}")
         return 0
 
+    print(f"[RA] fetched {len(ra_rows)} result rows for {target_date}")
+
+    # Group by (track, state, race_no) to find/create meetings and races
+    from collections import defaultdict
+    grouped: dict[tuple, list] = defaultdict(list)
+    for rr in ra_rows:
+        key = (rr.track, rr.state)
+        grouped[key].append(rr)
+
     total_updates = 0
 
-    for m in meetings_json:
-        if not isinstance(m, dict):
+    for (track_name, state), rows in grouped.items():
+        if not track_name:
             continue
-
-        track_name = (
-            m.get("track")
-            or m.get("track_name")
-            or m.get("meeting_name")
-        )
-        if not isinstance(track_name, str):
-            continue
-
-        state = (m.get("state") or m.get("State") or "").strip() or "VIC"
-        country = (m.get("country") or "AUS").strip() or "AUS"
-        ra_meetcode = (
-            m.get("ra_meetcode")
-            or m.get("meetCode")
-            or m.get("meetingCode")
-        )
 
         # --- Find or create Meeting ---
-        query = db.query(models.Meeting)
-        meeting: models.Meeting | None = None
-
-        if ra_meetcode:
-            meeting = query.filter(models.Meeting.ra_meetcode == ra_meetcode).first()
-
-        if not meeting:
-            meeting = (
-                query.filter(
-                    models.Meeting.date == target_date,
-                    models.Meeting.track_name == track_name,
-                    models.Meeting.state == state,
-                )
-                .first()
+        meeting = (
+            db.query(models.Meeting)
+            .filter(
+                models.Meeting.date == target_date,
+                models.Meeting.track_name == track_name,
+                models.Meeting.state == state,
             )
+            .first()
+        )
 
         if not meeting:
-            # If this meeting wasn't created via daily_generator,
-            # create it now so results still have a home.
             meeting = models.Meeting(
                 date=target_date,
                 track_name=track_name,
                 state=state,
-                country=country,
+                country="AUS",
                 pf_meeting_id=None,
-                ra_meetcode=ra_meetcode,
+                ra_meetcode=None,
             )
             db.add(meeting)
             db.flush()
             print(f"[RA] created Meeting for {track_name} {state} {target_date}")
 
-        races_json = m.get("races") or m.get("results") or []
-        if not isinstance(races_json, list):
-            continue
+        # Group rows by race_no
+        races_grouped: dict[int, list] = defaultdict(list)
+        for rr in rows:
+            races_grouped[rr.race_no].append(rr)
 
-        for rj in races_json:
-            if not isinstance(rj, dict):
-                continue
-
-            race_no = rj.get("raceNo") or rj.get("race_number") or rj.get("number")
-            try:
-                race_number = int(race_no)
-            except Exception:
-                continue
-
-            race_name = (
-                rj.get("raceName")
-                or rj.get("name")
-                or rj.get("race_name")
-            )
-
+        for race_number, runners in races_grouped.items():
             # --- Find or create Race ---
             race = (
                 db.query(models.Race)
@@ -198,83 +181,29 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
                 race = models.Race(
                     meeting_id=meeting.id,
                     race_number=race_number,
-                    name=race_name,
+                    name=None,
                     distance_m=None,
                     class_text=None,
                     scheduled_start=None,
                 )
                 db.add(race)
                 db.flush()
-                print(
-                    f"[RA] created Race R{race_number} for "
-                    f"{meeting.track_name} {meeting.date}"
-                )
-
-            runners = (
-                rj.get("results")
-                or rj.get("runners")
-                or rj.get("participants")
-                or []
-            )
-            if not isinstance(runners, list):
-                continue
 
             for runner in runners:
-                if not isinstance(runner, dict):
-                    continue
+                tab_number = runner.tab_number
+                horse_name = runner.horse_name or f"Runner #{tab_number}"
+                finish_position = runner.finishing_pos
+                is_scratched = runner.is_scratched
 
-                tab_raw = (
-                    runner.get("tabNumber")
-                    or runner.get("tab_number")
-                    or runner.get("tabNo")
-                    or runner.get("saddle_number")
-                    or runner.get("saddle")
-                    or runner.get("number")
-                )
-                try:
-                    tab_number = int(tab_raw)
-                except Exception:
-                    continue
+                if is_scratched:
+                    status = "SCRATCHED"
+                elif finish_position is not None:
+                    status = "RUN"
+                else:
+                    status = "NO_RESULT"
 
-                horse_name = (
-                    runner.get("horseName")
-                    or runner.get("horse_name")
-                    or runner.get("runner_name")
-                    or runner.get("name")
-                )
-                if not isinstance(horse_name, str):
-                    horse_name = f"Runner #{tab_number}"
-
-                finish_raw = (
-                    runner.get("finishPosition")
-                    or runner.get("finish_position")
-                    or runner.get("position")
-                    or runner.get("pos")
-                )
-                try:
-                    finish_position = int(finish_raw) if finish_raw is not None else None
-                except Exception:
-                    finish_position = None
-
-                status = (
-                    runner.get("status")
-                    or runner.get("result_status")
-                    or runner.get("race_status")
-                )
-
-                margin_text = (
-                    runner.get("margin_text")
-                    or runner.get("margin")
-                    or runner.get("marginText")
-                )
-
-                sp_raw = (
-                    runner.get("startingPrice")
-                    or runner.get("starting_price")
-                    or runner.get("sp")
-                    or runner.get("win_dividend")
-                )
-                starting_price = _to_decimal_or_none(sp_raw)
+                margin_text = str(runner.margin_lens) if runner.margin_lens is not None else None
+                starting_price = _to_decimal_or_none(runner.starting_price)
 
                 # --- Upsert RaceResult ---
                 rr = (
