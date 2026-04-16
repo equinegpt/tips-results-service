@@ -121,6 +121,8 @@ def compute_day_rollup(
                 "success_pct": 0.0,       # filled later
                 "quinella_hit": False,    # filled later
                 "trifecta_hit": False,    # filled later
+                "ai_best_win": False,     # did AI_BEST specifically win?
+                "ai_best_sp": None,       # AI_BEST starting price if won
             }
 
         stats = race_stats[rk]
@@ -147,6 +149,11 @@ def compute_day_rollup(
             sp = _safe_decimal(rr.starting_price if rr is not None else None)
             payout = stake_dec * sp
             stats["return"] = _add_money(stats["return"], payout)
+
+            # Track AI_BEST wins specifically
+            if tip.tip_type == "AI_BEST":
+                stats["ai_best_win"] = True
+                stats["ai_best_sp"] = float(sp) if sp else None
 
     # --------------------------------------------------
     # 4) Finish per-race metrics (profit, strike %, quinella, trifecta)
