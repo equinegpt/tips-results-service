@@ -123,6 +123,7 @@ def compute_day_rollup(
                 "trifecta_hit": False,    # filled later
                 "ai_best_win": False,     # did AI_BEST specifically win?
                 "ai_best_sp": None,       # AI_BEST starting price if won
+                "tips_detail": [],        # per-tip breakdown for expanded view
             }
 
         stats = race_stats[rk]
@@ -154,6 +155,17 @@ def compute_day_rollup(
             if tip.tip_type == "AI_BEST":
                 stats["ai_best_win"] = True
                 stats["ai_best_sp"] = float(sp) if sp else None
+
+        # Add per-tip detail for expanded race view
+        tip_detail = {
+            "tip_type": tip.tip_type,
+            "tab_number": tip.tab_number,
+            "horse_name": tip.horse_name,
+            "placing": pos,
+            "starting_price": float(rr.starting_price) if rr is not None and rr.starting_price else None,
+            "result": "win" if pos == 1 else ("place" if pos is not None and pos <= 3 else ("loss" if pos is not None else "pending")),
+        }
+        stats["tips_detail"].append(tip_detail)
 
     # --------------------------------------------------
     # 4) Finish per-race metrics (profit, strike %, quinella, trifecta)
