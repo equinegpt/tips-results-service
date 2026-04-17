@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from .database import get_db
 from . import schemas, models, daily_generator
-from .clients import ireel_client
+from .clients import ireel_client, gemini_client
 
 router = APIRouter()
 
@@ -20,10 +20,14 @@ def _meeting_has_tips(
     track_name: str,
     state: str,
     pf_meeting_id: Optional[int] = None,
+    source: Optional[str] = None,
 ) -> bool:
     """
     Check if tips already exist for a meeting.
-    Returns True if a TipRun exists for this meeting, False otherwise.
+
+    If source is provided, only checks for TipRuns from that source
+    (e.g. "iReel" or "Gemini"). This allows parallel tip generation
+    from multiple providers for the same meeting.
     """
     # First try to find the meeting
     meeting: models.Meeting | None = None
@@ -51,14 +55,12 @@ def _meeting_has_tips(
     if meeting is None:
         return False
 
-    # Check if any TipRun exists for this meeting
-    tip_run_count = (
-        db.query(models.TipRun)
-        .filter(models.TipRun.meeting_id == meeting.id)
-        .count()
-    )
+    # Check if TipRun exists for this meeting (optionally filtered by source)
+    q = db.query(models.TipRun).filter(models.TipRun.meeting_id == meeting.id)
+    if source:
+        q = q.filter(models.TipRun.source == source)
 
-    return tip_run_count > 0
+    return q.count() > 0
 
 
 @router.post("/tips/batch", response_model=schemas.MeetingTipsOut)
@@ -322,17 +324,18 @@ def cron_generate_daily_tips(
         meeting = payload.meeting
         tip_run_in = payload.tip_run
 
-        # Check if tips already exist for this meeting - skip if so
+        # Check if iReel tips already exist for this meeting - skip if so
         if _meeting_has_tips(
             db=db,
             meeting_date=meeting.date,
             track_name=meeting.track_name,
             state=meeting.state,
             pf_meeting_id=getattr(meeting, "pf_meeting_id", None),
+            source="iReel",
         ):
             print(
                 f"[CRON] SKIPPING {meeting.track_name} ({meeting.state}) on {meeting.date} "
-                f"- tips already exist"
+                f"- iReel tips already exist"
             )
             meetings_skipped += 1
             continue
@@ -466,21 +469,22 @@ def cron_generate_meeting_tips(
 
     meeting = payload.meeting
 
-    # Skip if tips already exist for this meeting
+    # Skip if iReel tips already exist for this meeting
     if _meeting_has_tips(
         db=db,
         meeting_date=meeting.date,
         track_name=meeting.track_name,
         state=meeting.state,
         pf_meeting_id=getattr(meeting, "pf_meeting_id", None),
+        source="iReel",
     ):
         print(
             f"[CRON] (single) SKIPPING {meeting.track_name} ({meeting.state}) "
-            f"on {meeting.date} - tips already exist"
+            f"on {meeting.date} - iReel tips already exist"
         )
         raise HTTPException(
             status_code=409,
-            detail=f"Tips already exist for {meeting.track_name} ({meeting.state}) on {meeting.date}",
+            detail=f"iReel tips already exist for {meeting.track_name} ({meeting.state}) on {meeting.date}",
         )
 
     tip_run_in = payload.tip_run
@@ -538,16 +542,149 @@ def cron_generate_meeting_tips(
     return create_tips_batch(tips_batch, db=db)
 
 
+@router.post("/cron/generate-meeting-tips-gemini", response_model=schemas.MeetingTipsOut)
+def cron_generate_meeting_tips_gemini(
+    date_str: str = Query(..., alias="date"),
+    pf_meeting_id: int = Query(..., alias="pf_meeting_id"),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate Gemini tips for a single meeting via the Stablfy API.
+
+    Runs in parallel with iReel — stores tips with source="Gemini".
+    Uses the same M/P/C meeting filtering and scratchings/conditions
+    injection as the iReel endpoint.
+    """
+    target_date = date_type.fromisoformat(date_str)
+    print(
+        f"[GEMINI] Generating tips for pf_meeting_id={pf_meeting_id} "
+        f"on {target_date}"
+    )
+
+    # Build payloads (same as iReel — includes scratchings + conditions)
+    payloads = daily_generator.build_generate_tips_payloads_for_date(
+        target_date=target_date,
+        project_id="gemini",  # not used by Gemini, but required by schema
+        force_all_meetings=True,
+    )
+
+    payload = next(
+        (p for p in payloads if getattr(p.meeting, "pf_meeting_id", None) == pf_meeting_id),
+        None,
+    )
+
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No meeting with pf_meeting_id={pf_meeting_id} on {target_date}",
+        )
+
+    meeting = payload.meeting
+
+    # Skip if Gemini tips already exist (allows iReel tips to coexist)
+    if _meeting_has_tips(
+        db=db,
+        meeting_date=meeting.date,
+        track_name=meeting.track_name,
+        state=meeting.state,
+        pf_meeting_id=getattr(meeting, "pf_meeting_id", None),
+        source="Gemini",
+    ):
+        print(
+            f"[GEMINI] SKIPPING {meeting.track_name} ({meeting.state}) "
+            f"on {meeting.date} - Gemini tips already exist"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Gemini tips already exist for {meeting.track_name} "
+                f"({meeting.state}) on {meeting.date}"
+            ),
+        )
+
+    # Generate tips via Gemini for each race
+    races_entries: list[dict[str, Any]] = []
+
+    for race_ctx in payload.races:
+        race_in = race_ctx.race
+        scratchings = race_ctx.scratchings or []
+        track_condition = race_ctx.track_condition
+
+        print(
+            f"[GEMINI] Generating tips for {meeting.track_name} "
+            f"R{getattr(race_in, 'race_number', '?')}, "
+            f"scratchings={scratchings}, cond={track_condition!r}"
+        )
+
+        try:
+            tip_dicts = gemini_client.generate_race_tips(
+                meeting=meeting,
+                race=race_in,
+                scratchings=scratchings,
+                track_condition=track_condition,
+            )
+        except Exception as e:
+            print(
+                f"[GEMINI] Error for {meeting.track_name} "
+                f"R{getattr(race_in, 'race_number', '?')}: {e}"
+            )
+            tip_dicts = []
+
+        if not tip_dicts:
+            continue
+
+        races_entries.append({"race": race_in, "tips": tip_dicts})
+
+    if not races_entries:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"No Gemini tips generated for pf_meeting_id={pf_meeting_id} "
+                f"on {target_date}"
+            ),
+        )
+
+    # Store with source="Gemini" so they sit alongside iReel tips
+    gemini_tip_run = schemas.TipRunIn(
+        source="Gemini",
+        model_version="gemini-stablfy-v1",
+        meta={
+            "generated_by": "cron_generate_meeting_tips_gemini",
+            "pf_meeting_id": pf_meeting_id,
+        },
+    )
+
+    tips_batch = schemas.TipsBatchIn(
+        meeting=meeting,
+        tip_run=gemini_tip_run,
+        races=races_entries,
+    )
+
+    return create_tips_batch(tips_batch, db=db)
+
+
 @router.get("/tips", response_model=list[schemas.MeetingTipsOut])
 def list_tips(
     meeting_date: date_type = Query(..., alias="date"),
     track_name: str | None = None,
     state: str | None = None,
+    source: str | None = Query(
+        default=None,
+        description=(
+            "Filter by tip source: 'iReel', 'Gemini', or 'all'. "
+            "Defaults to 'iReel' so existing app builds are not affected. "
+            "Pass source=all to get both providers."
+        ),
+    ),
     db: Session = Depends(get_db),
 ):
     """
     List tip runs (and tips) for a given date, optionally filtered
-    by track_name and/or state.
+    by track_name, state, and/or source.
+
+    IMPORTANT: defaults to source=iReel to protect existing app builds
+    that don't expect multiple tip runs per meeting. Pass source=all
+    or source=Gemini explicitly to get other providers.
     """
     q = db.query(models.TipRun).join(models.Meeting)
     q = q.filter(models.Meeting.date == meeting_date)
@@ -556,6 +693,12 @@ def list_tips(
         q = q.filter(models.Meeting.track_name == track_name)
     if state:
         q = q.filter(models.Meeting.state == state)
+
+    # Default to iReel to protect existing app builds.
+    # Pass source=all to get everything, or source=Gemini for Gemini only.
+    effective_source = source if source is not None else "iReel"
+    if effective_source.lower() != "all":
+        q = q.filter(models.TipRun.source == effective_source)
 
     tip_runs = q.all()
     results: list[schemas.MeetingTipsOut] = []

@@ -5,8 +5,11 @@
 # Generates daily tips by calling /cron/generate-meeting-tips ONCE PER
 # MEETING instead of one massive /cron/generate-daily-tips request.
 #
+# Calls BOTH iReel and Gemini endpoints per meeting (parallel providers).
+#
 # This avoids Render's 30-second request timeout killing the job partway
 # through. Each per-meeting request takes ~20-30s (10 races × 2s iReel).
+# Gemini takes longer (~15-20s per race) but within the 300s curl limit.
 #
 # Usage (Render cron):
 #   bash scripts/generate_tips_cron.sh
@@ -114,16 +117,20 @@ echo "[CRON] Found ${TOTAL} eligible meetings (M + P + Country with big Maiden)"
 echo ""
 
 # ------------------------------------------------------------------
-# Step 2: Call /cron/generate-meeting-tips per meeting
+# Step 2: Call iReel + Gemini endpoints per meeting
 # ------------------------------------------------------------------
-SUCCESS=0
-FAILED=0
-SKIPPED=0
+IREEL_SUCCESS=0
+IREEL_FAILED=0
+IREEL_SKIPPED=0
+GEMINI_SUCCESS=0
+GEMINI_FAILED=0
+GEMINI_SKIPPED=0
 
 while IFS='|' read -r MEETING_ID TRACK STATE TYPE; do
   echo "--------------------------------------------"
   echo "[CRON] ${TRACK} (${STATE}) - ${TYPE} - meetingId=${MEETING_ID}"
 
+  # --- iReel ---
   HTTP_CODE=$(curl -s -o /tmp/trs_response.json -w "%{http_code}" \
     -X POST \
     "${TRS}/cron/generate-meeting-tips?date=${TARGET_DATE}&pf_meeting_id=${MEETING_ID}&project_id=${PROJECT_ID}" \
@@ -138,13 +145,12 @@ try:
 except:
     print('?')
 " 2>/dev/null || echo "?")
-    echo "[CRON] ✅ ${TRACK}: ${RACE_COUNT} races with tips"
-    SUCCESS=$((SUCCESS + 1))
+    echo "[CRON] ✅ iReel  ${TRACK}: ${RACE_COUNT} races"
+    IREEL_SUCCESS=$((IREEL_SUCCESS + 1))
 
   elif [ "$HTTP_CODE" = "409" ] || [ "$HTTP_CODE" = "422" ]; then
-    # Already has tips or validation error — skip
-    echo "[CRON] ⏭  ${TRACK}: skipped (HTTP ${HTTP_CODE})"
-    SKIPPED=$((SKIPPED + 1))
+    echo "[CRON] ⏭  iReel  ${TRACK}: skipped (HTTP ${HTTP_CODE})"
+    IREEL_SKIPPED=$((IREEL_SKIPPED + 1))
 
   else
     DETAIL=$(python3 -c "
@@ -155,11 +161,49 @@ try:
 except:
     print('(could not parse response)')
 " 2>/dev/null || echo "(no response)")
-    echo "[CRON] ❌ ${TRACK}: FAILED (HTTP ${HTTP_CODE}) - ${DETAIL}"
-    FAILED=$((FAILED + 1))
+    echo "[CRON] ❌ iReel  ${TRACK}: FAILED (HTTP ${HTTP_CODE}) - ${DETAIL}"
+    IREEL_FAILED=$((IREEL_FAILED + 1))
   fi
 
-  # Small pause between meetings to be nice to iReel
+  # Small pause between providers
+  sleep 1
+
+  # --- Gemini ---
+  HTTP_CODE=$(curl -s -o /tmp/trs_gemini_response.json -w "%{http_code}" \
+    -X POST \
+    "${TRS}/cron/generate-meeting-tips-gemini?date=${TARGET_DATE}&pf_meeting_id=${MEETING_ID}" \
+    --max-time 600)
+
+  if [ "$HTTP_CODE" = "200" ]; then
+    RACE_COUNT=$(python3 -c "
+import json
+try:
+    d = json.load(open('/tmp/trs_gemini_response.json'))
+    print(len(d.get('races', [])))
+except:
+    print('?')
+" 2>/dev/null || echo "?")
+    echo "[CRON] ✅ Gemini ${TRACK}: ${RACE_COUNT} races"
+    GEMINI_SUCCESS=$((GEMINI_SUCCESS + 1))
+
+  elif [ "$HTTP_CODE" = "409" ] || [ "$HTTP_CODE" = "422" ]; then
+    echo "[CRON] ⏭  Gemini ${TRACK}: skipped (HTTP ${HTTP_CODE})"
+    GEMINI_SKIPPED=$((GEMINI_SKIPPED + 1))
+
+  else
+    DETAIL=$(python3 -c "
+import json
+try:
+    d = json.load(open('/tmp/trs_gemini_response.json'))
+    print(d.get('detail', '(no detail)'))
+except:
+    print('(could not parse response)')
+" 2>/dev/null || echo "(no response)")
+    echo "[CRON] ❌ Gemini ${TRACK}: FAILED (HTTP ${HTTP_CODE}) - ${DETAIL}"
+    GEMINI_FAILED=$((GEMINI_FAILED + 1))
+  fi
+
+  # Pause between meetings
   sleep 2
 
 done <<< "$MEETINGS"
@@ -167,12 +211,14 @@ done <<< "$MEETINGS"
 echo ""
 echo "============================================"
 echo "[CRON] DONE for ${TARGET_DATE}"
-echo "[CRON] ✅ Success: ${SUCCESS}  ⏭ Skipped: ${SKIPPED}  ❌ Failed: ${FAILED}"
+echo "[CRON] iReel:  ✅ ${IREEL_SUCCESS}  ⏭ ${IREEL_SKIPPED}  ❌ ${IREEL_FAILED}"
+echo "[CRON] Gemini: ✅ ${GEMINI_SUCCESS}  ⏭ ${GEMINI_SKIPPED}  ❌ ${GEMINI_FAILED}"
 echo "============================================"
 
-# Exit with error if ALL meetings failed
-if [ "$SUCCESS" -eq 0 ] && [ "$FAILED" -gt 0 ]; then
-  echo "[CRON] All meetings failed!"
+# Exit with error if ALL meetings failed for BOTH providers
+if [ "$IREEL_SUCCESS" -eq 0 ] && [ "$IREEL_FAILED" -gt 0 ] \
+   && [ "$GEMINI_SUCCESS" -eq 0 ] && [ "$GEMINI_FAILED" -gt 0 ]; then
+  echo "[CRON] All meetings failed for both providers!"
   exit 1
 fi
 

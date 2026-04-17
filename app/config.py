@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     ireel_api_base_url: str = "https://api.ireel.ai"
     ireel_assistant_id: str | None = None
 
+    # Gemini (via Stablfy API) config
+    stablfy_api_url: str = "https://api.stablfy.com"
+    stablfy_username: str = ""
+    stablfy_password: str = ""
+
     # Pydantic settings config
     model_config = SettingsConfigDict(
         env_file=".env",
