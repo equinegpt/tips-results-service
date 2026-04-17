@@ -208,6 +208,23 @@ except:
 
 done <<< "$MEETINGS"
 
+# ------------------------------------------------------------------
+# Step 3: Cache Sportsbet event IDs for today's races
+# (Used by the 11pm results cron to scrape exotic dividends)
+# ------------------------------------------------------------------
+echo ""
+echo "[CRON] Caching SB event IDs for ${TARGET_DATE}..."
+SB_CACHE_CODE=$(curl -s -o /tmp/sb_cache.json -w "%{http_code}" \
+  -X POST "${RA}/cache-sb-events?date=${TARGET_DATE}" \
+  --max-time 60)
+
+if [ "$SB_CACHE_CODE" = "200" ]; then
+  CACHED=$(python3 -c "import json; print(json.load(open('/tmp/sb_cache.json')).get('cached', 0))" 2>/dev/null || echo "?")
+  echo "[CRON] ✅ Cached ${CACHED} SB event IDs"
+else
+  echo "[CRON] ⚠️  SB event cache failed (HTTP ${SB_CACHE_CODE}) — exotics scraping may not work tonight"
+fi
+
 echo ""
 echo "============================================"
 echo "[CRON] DONE for ${TARGET_DATE}"
