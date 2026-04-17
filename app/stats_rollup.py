@@ -7,7 +7,38 @@ from typing import Any, Dict, List, Tuple
 
 from sqlalchemy.orm import Session
 
+import httpx
+
 from . import models
+from .config import settings
+
+
+def _fetch_dividends(target_date: date_type) -> Dict[Tuple[str, int, str], Dict[str, Any]]:
+    """
+    Fetch exotic dividends from RA Crawler /dividends endpoint.
+
+    Returns dict keyed by (track, race_no, dividend_type) → {"amount": float, "combo": str}
+    """
+    base = getattr(settings, "ra_crawler_base_url", "https://ra-crawler.onrender.com").rstrip("/")
+    url = f"{base}/dividends"
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url, params={"date": target_date.isoformat()})
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+    except Exception:
+        return {}
+
+    result: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+    for d in data:
+        key = (d.get("track", ""), d.get("race_no", 0), d.get("dividend_type", ""))
+        result[key] = {
+            "amount": d.get("dividend_amount"),
+            "combo": d.get("combination", ""),
+        }
+    return result
 
 
 def _safe_decimal(value: Any) -> Decimal:
@@ -298,7 +329,35 @@ def compute_day_rollup(
         day_totals["success_pct"] = 0.0
 
     # --------------------------------------------------
-    # 7) Normalise Decimals -> floats for JSON / Jinja
+    # 7) Enrich with exotic dividends from RA Crawler
+    # --------------------------------------------------
+    try:
+        dividends = _fetch_dividends(target_date)
+        if dividends:
+            for m in meetings.values():
+                track = m["track_name"]
+                for st in m["races"]:
+                    race_no = st["race_number"]
+                    # Quinella dividend
+                    q_key = (track, race_no, "Q")
+                    if q_key in dividends:
+                        st["quinella_dividend"] = dividends[q_key]["amount"]
+                        st["quinella_combo"] = dividends[q_key]["combo"]
+                    # Trifecta dividend
+                    t_key = (track, race_no, "T")
+                    if t_key in dividends:
+                        st["trifecta_dividend"] = dividends[t_key]["amount"]
+                        st["trifecta_combo"] = dividends[t_key]["combo"]
+                    # Quaddie dividend
+                    quad_key = (track, race_no, "QUAD")
+                    if quad_key in dividends:
+                        st["quaddie_dividend"] = dividends[quad_key]["amount"]
+                        st["quaddie_combo"] = dividends[quad_key]["combo"]
+    except Exception as e:
+        print(f"[stats_rollup] WARNING: failed to fetch dividends: {e}")
+
+    # --------------------------------------------------
+    # 8) Normalise Decimals -> floats for JSON / Jinja
     # --------------------------------------------------
     def _norm_money(d: Dict[str, Any]) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
