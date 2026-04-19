@@ -208,6 +208,23 @@ except:
 
 done <<< "$MEETINGS"
 
+# ------------------------------------------------------------------
+# Step 3: Cache Sportsbet event IDs for today's races
+# (Fetches each tipped track page via Scrape.do while races are live)
+# ------------------------------------------------------------------
+echo ""
+echo "[CRON] Caching SB event IDs for ${TARGET_DATE}..."
+SB_CACHE_CODE=$(curl -s -o /tmp/sb_cache.json -w "%{http_code}" \
+  -X POST "${RA}/cache-sb-events?date=${TARGET_DATE}" \
+  --max-time 300)
+
+if [ "$SB_CACHE_CODE" = "200" ]; then
+  CACHED=$(python3 -c "import json; print(json.load(open('/tmp/sb_cache.json')).get('cached', 0))" 2>/dev/null || echo "?")
+  echo "[CRON] ✅ Cached ${CACHED} SB event IDs for exotic scraping tonight"
+else
+  echo "[CRON] ⚠️  SB cache failed (HTTP ${SB_CACHE_CODE})"
+fi
+
 echo ""
 echo "============================================"
 echo "[CRON] DONE for ${TARGET_DATE}"
