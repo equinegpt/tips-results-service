@@ -694,13 +694,28 @@ def list_tips(
     if state:
         q = q.filter(models.Meeting.state == state)
 
-    # Default to iReel to protect existing app builds.
-    # Pass source=all to get everything, or source=Gemini for Gemini only.
-    effective_source = source if source is not None else "iReel"
-    if effective_source.lower() != "all":
-        q = q.filter(models.TipRun.source == effective_source)
-
-    tip_runs = q.all()
+    # Prefer Gemini tips, fall back to iReel if no Gemini tips exist.
+    # Pass source=iReel or source=Gemini to force one provider,
+    # or source=all to get both.
+    if source is not None and source.lower() != "all":
+        q = q.filter(models.TipRun.source == source)
+        tip_runs = q.all()
+    elif source is not None and source.lower() == "all":
+        tip_runs = q.all()
+    else:
+        # Default: try Gemini first, fall back to iReel
+        gemini_q = q.filter(models.TipRun.source == "Gemini")
+        tip_runs = gemini_q.all()
+        if not tip_runs:
+            ireel_q = db.query(models.TipRun).join(models.Meeting).filter(
+                models.Meeting.date == meeting_date
+            )
+            if track_name:
+                ireel_q = ireel_q.filter(models.Meeting.track_name == track_name)
+            if state:
+                ireel_q = ireel_q.filter(models.Meeting.state == state)
+            ireel_q = ireel_q.filter(models.TipRun.source == "iReel")
+            tip_runs = ireel_q.all()
     results: list[schemas.MeetingTipsOut] = []
 
     for tr in tip_runs:
