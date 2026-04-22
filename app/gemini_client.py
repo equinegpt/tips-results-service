@@ -272,6 +272,8 @@ class GeminiClient:
         try:
             _, rest = line.split(":", 1)
             rest = rest.strip().replace("**", "").replace("\t", " ")
+            # Clean unicode escapes (e.g. \u0027 → ')
+            rest = rest.replace("\\u0027", "'").replace("\\u2019", "'")
 
             dash_pat = re.compile(r'\s*[—–]\s*|\s+-\s+')
             parts = dash_pat.split(rest, 1)

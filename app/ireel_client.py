@@ -297,6 +297,8 @@ class IreelClient:
         # Decode common escaped forms
         s = s.replace("\\u2014", "—")
         s = s.replace("\u2014", "—")
+        s = s.replace("\\u0027", "'")
+        s = s.replace("\\u2019", "'")
 
         # Strip markdown bold markers
         s = s.replace("**", "")
