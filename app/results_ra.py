@@ -147,13 +147,13 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
         print(f"[RA] no existing meetings in TRS for {target_date} — nothing to match")
         return 0
 
-    # Build a fuzzy lookup: normalised(track_name) + state → Meeting
-    meeting_lookup: dict[tuple, models.Meeting] = {}
+    # Build a fuzzy lookup: normalised(track_name) + state → list of Meetings
+    # (may have multiple per track when both iReel and Gemini tips exist)
+    from collections import defaultdict as _defaultdict
+    meeting_lookup: dict[tuple, list] = _defaultdict(list)
     for m in existing_meetings:
         key = (_normalize(m.track_name), (m.state or "").upper())
-        meeting_lookup[key] = m
-        # Also add without state for looser matching
-        meeting_lookup[(_normalize(m.track_name),)] = m
+        meeting_lookup[key].append(m)
 
     print(f"[RA] {len(existing_meetings)} existing meetings to match against")
 
@@ -170,31 +170,21 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
         if not track_name:
             continue
 
-        # --- Find existing Meeting (fuzzy match) ---
+        # --- Find ALL existing Meetings (fuzzy match) ---
         norm_track = _normalize(track_name)
         norm_state = (state or "").upper()
 
-        meeting = meeting_lookup.get((norm_track, norm_state))
+        matched_meetings = meeting_lookup.get((norm_track, norm_state), [])
 
-        # Try without state
-        if not meeting:
-            meeting = meeting_lookup.get((norm_track,))
+        # Try substring match if exact fails
+        if not matched_meetings:
+            for key, meetings_list in meeting_lookup.items():
+                if len(key) >= 1 and isinstance(key[0], str):
+                    if norm_track in key[0] or key[0] in norm_track:
+                        matched_meetings = meetings_list
+                        break
 
-        # Try substring match (e.g., "swan hill" in "swan hill racecourse")
-        if not meeting:
-            for (key_parts), m in meeting_lookup.items():
-                if len(key_parts) >= 1:
-                    existing_norm = key_parts[0] if isinstance(key_parts, tuple) else key_parts
-                else:
-                    continue
-                if isinstance(existing_norm, str) and (
-                    norm_track in existing_norm or existing_norm in norm_track
-                ):
-                    meeting = m
-                    break
-
-        if not meeting:
-            # No tipped meeting for this track — skip (don't create orphans)
+        if not matched_meetings:
             continue
 
         # Group rows by race_no
@@ -202,68 +192,68 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
         for rr in rows:
             races_grouped[rr.race_no].append(rr)
 
-        for race_number, runners in races_grouped.items():
-            # --- Find existing Race (don't create new ones) ---
-            race = (
-                db.query(models.Race)
-                .filter(
-                    models.Race.meeting_id == meeting.id,
-                    models.Race.race_number == race_number,
-                )
-                .first()
-            )
-
-            if not race:
-                # No tipped race for this number — skip
-                continue
-
-            for runner in runners:
-                tab_number = runner.tab_number
-                horse_name = runner.horse_name or f"Runner #{tab_number}"
-                finish_position = runner.finishing_pos
-                is_scratched = runner.is_scratched
-
-                if is_scratched:
-                    status = "SCRATCHED"
-                elif finish_position is not None:
-                    status = "RUN"
-                else:
-                    status = "NO_RESULT"
-
-                margin_text = str(runner.margin_lens) if runner.margin_lens is not None else None
-                starting_price = _to_decimal_or_none(runner.starting_price)
-
-                # --- Upsert RaceResult ---
-                rr = (
-                    db.query(models.RaceResult)
+        # Attach results to ALL matching meetings (iReel + Gemini)
+        for meeting in matched_meetings:
+            for race_number, runners in races_grouped.items():
+                race = (
+                    db.query(models.Race)
                     .filter(
-                        models.RaceResult.provider == "RA",
-                        models.RaceResult.race_id == race.id,
-                        models.RaceResult.tab_number == tab_number,
+                        models.Race.meeting_id == meeting.id,
+                        models.Race.race_number == race_number,
                     )
                     .first()
                 )
 
-                if not rr:
-                    rr = models.RaceResult(
-                        provider="RA",
-                        race_id=race.id,
-                        tab_number=tab_number,
-                        horse_name=horse_name,
-                        finish_position=finish_position,
-                        status=status,
-                        margin_text=margin_text,
-                        starting_price=starting_price,
+                if not race:
+                    continue
+
+                for runner in runners:
+                    tab_number = runner.tab_number
+                    horse_name = runner.horse_name or f"Runner #{tab_number}"
+                    finish_position = runner.finishing_pos
+                    is_scratched = runner.is_scratched
+
+                    if is_scratched:
+                        status = "SCRATCHED"
+                    elif finish_position is not None:
+                        status = "RUN"
+                    else:
+                        status = "NO_RESULT"
+
+                    margin_text = str(runner.margin_lens) if runner.margin_lens is not None else None
+                    starting_price = _to_decimal_or_none(runner.starting_price)
+
+                    # --- Upsert RaceResult ---
+                    rr = (
+                        db.query(models.RaceResult)
+                        .filter(
+                            models.RaceResult.provider == "RA",
+                            models.RaceResult.race_id == race.id,
+                            models.RaceResult.tab_number == tab_number,
+                        )
+                        .first()
                     )
-                    db.add(rr)
-                    total_updates += 1
-                else:
-                    rr.horse_name = horse_name
-                    rr.finish_position = finish_position
-                    rr.status = status
-                    rr.margin_text = margin_text
-                    rr.starting_price = starting_price
-                    total_updates += 1
+
+                    if not rr:
+                        rr = models.RaceResult(
+                            provider="RA",
+                            race_id=race.id,
+                            tab_number=tab_number,
+                            horse_name=horse_name,
+                            finish_position=finish_position,
+                            status=status,
+                            margin_text=margin_text,
+                            starting_price=starting_price,
+                        )
+                        db.add(rr)
+                        total_updates += 1
+                    else:
+                        rr.horse_name = horse_name
+                        rr.finish_position = finish_position
+                        rr.status = status
+                        rr.margin_text = margin_text
+                        rr.starting_price = starting_price
+                        total_updates += 1
 
     db.commit()
     print(f"[RA] upserted {total_updates} RaceResult rows for {target_date}")
