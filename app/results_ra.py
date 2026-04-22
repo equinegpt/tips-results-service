@@ -98,12 +98,24 @@ def _to_decimal_or_none(val: Any) -> Decimal | None:
         return None
 
 
+def _normalize(s: str) -> str:
+    """Lowercase, strip sponsors, collapse spaces for fuzzy matching."""
+    import re
+    t = s.lower().strip()
+    for sp in ("sportsbet", "ladbrokes", "bet365", "picklebet",
+               "thomas farms", "aquis park", "aquis", "tabtouch"):
+        t = t.replace(sp, "")
+    t = re.sub(r"[^a-z0-9]+", " ", t).strip()
+    return t
+
+
 def fetch_results_for_date(target_date: date, db: Session) -> int:
     """
     Main entrypoint: fetch RA results from crawler for `target_date` and
-    upsert into RaceResult (and, if necessary, Meeting/Race).
+    attach to EXISTING meetings/races that have tips.
 
-    Uses RAResultsClient which handles the flat array format from RA Crawler.
+    Does NOT create new Meeting/Race rows — only attaches results
+    to meetings that were tipped (M/P/big-maiden C).
 
     Returns the number of RaceResult rows inserted/updated.
     """
@@ -124,7 +136,28 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
 
     print(f"[RA] fetched {len(ra_rows)} result rows for {target_date}")
 
-    # Group by (track, state, race_no) to find/create meetings and races
+    # Load ALL existing meetings for this date (these are the ones with tips)
+    existing_meetings = (
+        db.query(models.Meeting)
+        .filter(models.Meeting.date == target_date)
+        .all()
+    )
+
+    if not existing_meetings:
+        print(f"[RA] no existing meetings in TRS for {target_date} — nothing to match")
+        return 0
+
+    # Build a fuzzy lookup: normalised(track_name) + state → Meeting
+    meeting_lookup: dict[tuple, models.Meeting] = {}
+    for m in existing_meetings:
+        key = (_normalize(m.track_name), (m.state or "").upper())
+        meeting_lookup[key] = m
+        # Also add without state for looser matching
+        meeting_lookup[(_normalize(m.track_name),)] = m
+
+    print(f"[RA] {len(existing_meetings)} existing meetings to match against")
+
+    # Group RA results by (track, state)
     from collections import defaultdict
     grouped: dict[tuple, list] = defaultdict(list)
     for rr in ra_rows:
@@ -137,29 +170,32 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
         if not track_name:
             continue
 
-        # --- Find or create Meeting ---
-        meeting = (
-            db.query(models.Meeting)
-            .filter(
-                models.Meeting.date == target_date,
-                models.Meeting.track_name == track_name,
-                models.Meeting.state == state,
-            )
-            .first()
-        )
+        # --- Find existing Meeting (fuzzy match) ---
+        norm_track = _normalize(track_name)
+        norm_state = (state or "").upper()
+
+        meeting = meeting_lookup.get((norm_track, norm_state))
+
+        # Try without state
+        if not meeting:
+            meeting = meeting_lookup.get((norm_track,))
+
+        # Try substring match (e.g., "swan hill" in "swan hill racecourse")
+        if not meeting:
+            for (key_parts), m in meeting_lookup.items():
+                if len(key_parts) >= 1:
+                    existing_norm = key_parts[0] if isinstance(key_parts, tuple) else key_parts
+                else:
+                    continue
+                if isinstance(existing_norm, str) and (
+                    norm_track in existing_norm or existing_norm in norm_track
+                ):
+                    meeting = m
+                    break
 
         if not meeting:
-            meeting = models.Meeting(
-                date=target_date,
-                track_name=track_name,
-                state=state,
-                country="AUS",
-                pf_meeting_id=None,
-                ra_meetcode=None,
-            )
-            db.add(meeting)
-            db.flush()
-            print(f"[RA] created Meeting for {track_name} {state} {target_date}")
+            # No tipped meeting for this track — skip (don't create orphans)
+            continue
 
         # Group rows by race_no
         races_grouped: dict[int, list] = defaultdict(list)
@@ -167,7 +203,7 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
             races_grouped[rr.race_no].append(rr)
 
         for race_number, runners in races_grouped.items():
-            # --- Find or create Race ---
+            # --- Find existing Race (don't create new ones) ---
             race = (
                 db.query(models.Race)
                 .filter(
@@ -178,16 +214,8 @@ def fetch_results_for_date(target_date: date, db: Session) -> int:
             )
 
             if not race:
-                race = models.Race(
-                    meeting_id=meeting.id,
-                    race_number=race_number,
-                    name=None,
-                    distance_m=None,
-                    class_text=None,
-                    scheduled_start=None,
-                )
-                db.add(race)
-                db.flush()
+                # No tipped race for this number — skip
+                continue
 
             for runner in runners:
                 tab_number = runner.tab_number
