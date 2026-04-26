@@ -663,6 +663,239 @@ def cron_generate_meeting_tips_gemini(
     return create_tips_batch(tips_batch, db=db)
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Clone + Gemini thin-prompt endpoint
+# ──────────────────────────────────────────────────────────────────────
+
+CLONE_API_URL = "https://stablfy-social.onrender.com/api/clone"
+
+
+def _fetch_clone_picks_for_meeting(
+    target_date: date_type,
+    pf_meeting_id: int,
+) -> dict[int, list[dict]]:
+    """
+    Fetch clone runner data from stablfy-social and return top-3 picks
+    per race for the given meeting.
+
+    Returns {race_number: [{tab_number, horse_name, role, clone_price}]}
+    """
+    import httpx
+
+    resp = httpx.get(
+        CLONE_API_URL,
+        params={"date": target_date.isoformat()},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    runners = data.get("runners", [])
+
+    # Filter to this meeting
+    meeting_runners = [
+        r for r in runners
+        if r.get("meeting_id") == pf_meeting_id
+    ]
+
+    # Group by race_number, sort by clone_rank, take top 3
+    by_race: dict[int, list[dict]] = {}
+    for r in meeting_runners:
+        rn = r.get("race_number")
+        if rn is not None:
+            by_race.setdefault(int(rn), []).append(r)
+
+    ROLES = ["AI Best", "Danger", "Value"]
+    races: dict[int, list[dict]] = {}
+    for rn, race_runners in by_race.items():
+        race_runners.sort(key=lambda x: x.get("clone_rank", 999))
+        top3 = race_runners[:3]
+        picks = []
+        for i, runner in enumerate(top3):
+            picks.append({
+                "tab_number": runner.get("tab_number"),
+                "horse_name": runner.get("horse", "?"),
+                "role": ROLES[i],
+                "clone_price": runner.get("clone_price"),
+                "clone_rank": runner.get("clone_rank"),
+            })
+        if len(picks) == 3:
+            races[rn] = picks
+
+    return races
+
+
+@router.post(
+    "/cron/generate-meeting-tips-clone",
+    response_model=schemas.MeetingTipsOut,
+)
+def cron_generate_meeting_tips_clone(
+    date_str: str = Query(..., alias="date"),
+    pf_meeting_id: int = Query(..., alias="pf_meeting_id"),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate clone-powered tips for a single meeting.
+
+    1. Fetch top-3 clone picks per race from stablfy-social
+    2. Send thin prompt to Gemini for commentary only
+    3. Store tips with source="Clone"
+    """
+    target_date = date_type.fromisoformat(date_str)
+    print(
+        f"[CLONE] Generating tips for pf_meeting_id={pf_meeting_id} "
+        f"on {target_date}"
+    )
+
+    # Fetch clone picks
+    try:
+        clone_picks_by_race = _fetch_clone_picks_for_meeting(
+            target_date, pf_meeting_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch clone data: {e}",
+        )
+
+    if not clone_picks_by_race:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No clone picks for pf_meeting_id={pf_meeting_id} "
+                f"on {target_date}"
+            ),
+        )
+
+    print(f"[CLONE] Got clone picks for {len(clone_picks_by_race)} races")
+
+    # Build payloads (for scratchings + conditions + meeting metadata)
+    payloads = daily_generator.build_generate_tips_payloads_for_date(
+        target_date=target_date,
+        project_id="clone",
+        force_all_meetings=True,
+    )
+
+    payload = next(
+        (p for p in payloads
+         if getattr(p.meeting, "pf_meeting_id", None) == pf_meeting_id),
+        None,
+    )
+
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No meeting with pf_meeting_id={pf_meeting_id} "
+                f"on {target_date}"
+            ),
+        )
+
+    meeting = payload.meeting
+
+    # Skip if Clone tips already exist
+    if _meeting_has_tips(
+        db=db,
+        meeting_date=meeting.date,
+        track_name=meeting.track_name,
+        state=meeting.state,
+        pf_meeting_id=getattr(meeting, "pf_meeting_id", None),
+        source="Clone",
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Clone tips already exist for {meeting.track_name} "
+                f"({meeting.state}) on {meeting.date}"
+            ),
+        )
+
+    # Generate thin-prompt commentary for each race
+    races_entries: list[dict[str, Any]] = []
+
+    for race_ctx in payload.races:
+        race_in = race_ctx.race
+        race_number = getattr(race_in, "race_number", None)
+        scratchings = race_ctx.scratchings or []
+        track_condition = race_ctx.track_condition
+
+        clone_picks = clone_picks_by_race.get(race_number)
+        if not clone_picks:
+            print(
+                f"[CLONE] No clone picks for {meeting.track_name} "
+                f"R{race_number}, skipping"
+            )
+            continue
+
+        # Filter out scratched horses from clone picks
+        scratched_set = set(scratchings)
+        clone_picks = [
+            p for p in clone_picks
+            if p["tab_number"] not in scratched_set
+        ]
+        if len(clone_picks) < 3:
+            print(
+                f"[CLONE] Clone pick scratched in {meeting.track_name} "
+                f"R{race_number}, skipping"
+            )
+            continue
+
+        print(
+            f"[CLONE] {meeting.track_name} R{race_number}: "
+            f"Best=#{clone_picks[0]['tab_number']} "
+            f"{clone_picks[0]['horse_name']}, "
+            f"Danger=#{clone_picks[1]['tab_number']} "
+            f"{clone_picks[1]['horse_name']}, "
+            f"Value=#{clone_picks[2]['tab_number']} "
+            f"{clone_picks[2]['horse_name']}"
+        )
+
+        try:
+            tip_dicts = gemini_client.generate_clone_race_tips(
+                meeting=meeting,
+                race=race_in,
+                scratchings=scratchings,
+                track_condition=track_condition,
+                clone_picks=clone_picks,
+            )
+        except Exception as e:
+            print(
+                f"[CLONE] Error for {meeting.track_name} "
+                f"R{race_number}: {e}"
+            )
+            tip_dicts = []
+
+        if not tip_dicts:
+            continue
+
+        races_entries.append({"race": race_in, "tips": tip_dicts})
+
+    if not races_entries:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"No Clone tips generated for "
+                f"pf_meeting_id={pf_meeting_id} on {target_date}"
+            ),
+        )
+
+    clone_tip_run = schemas.TipRunIn(
+        source="Clone",
+        model_version="clone-gemini-thin-v1",
+        meta={
+            "generated_by": "cron_generate_meeting_tips_clone",
+            "pf_meeting_id": pf_meeting_id,
+        },
+    )
+
+    tips_batch = schemas.TipsBatchIn(
+        meeting=meeting,
+        tip_run=clone_tip_run,
+        races=races_entries,
+    )
+
+    return create_tips_batch(tips_batch, db=db)
+
+
 @router.get("/tips", response_model=list[schemas.MeetingTipsOut])
 def list_tips(
     meeting_date: date_type = Query(..., alias="date"),
@@ -703,19 +936,19 @@ def list_tips(
     elif source is not None and source.lower() == "all":
         tip_runs = q.all()
     else:
-        # Default: try Gemini first, fall back to iReel
-        gemini_q = q.filter(models.TipRun.source == "Gemini")
-        tip_runs = gemini_q.all()
-        if not tip_runs:
-            ireel_q = db.query(models.TipRun).join(models.Meeting).filter(
-                models.Meeting.date == meeting_date
+        # Default preference: Clone → Gemini → iReel
+        for preferred_source in ("Clone", "Gemini", "iReel"):
+            source_q = db.query(models.TipRun).join(models.Meeting).filter(
+                models.Meeting.date == meeting_date,
+                models.TipRun.source == preferred_source,
             )
             if track_name:
-                ireel_q = ireel_q.filter(models.Meeting.track_name == track_name)
+                source_q = source_q.filter(models.Meeting.track_name == track_name)
             if state:
-                ireel_q = ireel_q.filter(models.Meeting.state == state)
-            ireel_q = ireel_q.filter(models.TipRun.source == "iReel")
-            tip_runs = ireel_q.all()
+                source_q = source_q.filter(models.Meeting.state == state)
+            tip_runs = source_q.all()
+            if tip_runs:
+                break
     results: list[schemas.MeetingTipsOut] = []
 
     for tr in tip_runs:

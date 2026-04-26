@@ -79,30 +79,31 @@ def compute_day_rollup(
     stake_dec = _safe_decimal(stake_per_tip)
 
     # --------------------------------------------------
-    # 1) Fetch tips for the day — prefer Gemini, fall back to iReel
+    # 1) Fetch tips for the day — prefer Clone → Gemini → iReel
     # --------------------------------------------------
-    # First try Gemini tip runs only
-    gemini_tip_run_ids = (
-        db.query(models.TipRun.id)
-        .join(models.Meeting)
-        .filter(models.Meeting.date == target_date)
-        .filter(models.TipRun.source == "Gemini")
-        .all()
-    )
-    gemini_ids = {r[0] for r in gemini_tip_run_ids}
-
-    if gemini_ids:
-        # Use Gemini tips only
-        rows = (
-            db.query(models.Tip, models.Race, models.Meeting)
-            .join(models.Race, models.Tip.race_id == models.Race.id)
-            .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
+    rows = []
+    for preferred_source in ("Clone", "Gemini", "iReel"):
+        source_ids = (
+            db.query(models.TipRun.id)
+            .join(models.Meeting)
             .filter(models.Meeting.date == target_date)
-            .filter(models.Tip.tip_run_id.in_(gemini_ids))
+            .filter(models.TipRun.source == preferred_source)
             .all()
         )
-    else:
-        # Fall back to iReel (or all tips if no source filtering)
+        if source_ids:
+            ids = {r[0] for r in source_ids}
+            rows = (
+                db.query(models.Tip, models.Race, models.Meeting)
+                .join(models.Race, models.Tip.race_id == models.Race.id)
+                .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
+                .filter(models.Meeting.date == target_date)
+                .filter(models.Tip.tip_run_id.in_(ids))
+                .all()
+            )
+            break
+
+    if not rows:
+        # Final fallback — all tips regardless of source
         rows = (
             db.query(models.Tip, models.Race, models.Meeting)
             .join(models.Race, models.Tip.race_id == models.Race.id)
