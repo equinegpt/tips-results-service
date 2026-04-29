@@ -79,10 +79,10 @@ def compute_day_rollup(
     stake_dec = _safe_decimal(stake_per_tip)
 
     # --------------------------------------------------
-    # 1) Fetch tips for the day — prefer Clone → Gemini → iReel
+    # 1) Fetch tips for the day — prefer Gemini → iReel (Clone is separate signal)
     # --------------------------------------------------
     rows = []
-    for preferred_source in ("Clone", "Gemini", "iReel"):
+    for preferred_source in ("Gemini", "iReel"):
         source_ids = (
             db.query(models.TipRun.id)
             .join(models.Meeting)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as date_type
 from typing import Any, Optional
 
@@ -602,18 +603,19 @@ def cron_generate_meeting_tips_gemini(
             ),
         )
 
-    # Generate tips via Gemini for each race
+    # Generate tips via Gemini — parallel conversations (up to 5 at a time)
+    MAX_PARALLEL = 5
     races_entries: list[dict[str, Any]] = []
 
-    for race_ctx in payload.races:
+    def _generate_one(race_ctx):
         race_in = race_ctx.race
         scratchings = race_ctx.scratchings or []
         track_condition = race_ctx.track_condition
+        race_num = getattr(race_in, "race_number", "?")
 
         print(
             f"[GEMINI] Generating tips for {meeting.track_name} "
-            f"R{getattr(race_in, 'race_number', '?')}, "
-            f"scratchings={scratchings}, cond={track_condition!r}"
+            f"R{race_num}, scratchings={scratchings}, cond={track_condition!r}"
         )
 
         try:
@@ -624,16 +626,19 @@ def cron_generate_meeting_tips_gemini(
                 track_condition=track_condition,
             )
         except Exception as e:
-            print(
-                f"[GEMINI] Error for {meeting.track_name} "
-                f"R{getattr(race_in, 'race_number', '?')}: {e}"
-            )
+            print(f"[GEMINI] Error for {meeting.track_name} R{race_num}: {e}")
             tip_dicts = []
 
-        if not tip_dicts:
-            continue
+        return race_in, tip_dicts
 
-        races_entries.append({"race": race_in, "tips": tip_dicts})
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
+        futures = {
+            executor.submit(_generate_one, rc): rc for rc in payload.races
+        }
+        for future in as_completed(futures):
+            race_in, tip_dicts = future.result()
+            if tip_dicts:
+                races_entries.append({"race": race_in, "tips": tip_dicts})
 
     if not races_entries:
         raise HTTPException(
@@ -936,8 +941,8 @@ def list_tips(
     elif source is not None and source.lower() == "all":
         tip_runs = q.all()
     else:
-        # Default preference: Clone → Gemini → iReel
-        for preferred_source in ("Clone", "Gemini", "iReel"):
+        # Default preference: Gemini → iReel (Clone is a separate signal, not default)
+        for preferred_source in ("Gemini", "iReel"):
             source_q = db.query(models.TipRun).join(models.Meeting).filter(
                 models.Meeting.date == meeting_date,
                 models.TipRun.source == preferred_source,
