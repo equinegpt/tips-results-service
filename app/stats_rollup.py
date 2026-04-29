@@ -79,38 +79,28 @@ def compute_day_rollup(
     stake_dec = _safe_decimal(stake_per_tip)
 
     # --------------------------------------------------
-    # 1) Fetch tips for the day — prefer Gemini → iReel (Clone is separate signal)
+    # 1) Fetch Gemini tips for the day
     # --------------------------------------------------
-    rows = []
-    for preferred_source in ("Gemini", "iReel"):
-        source_ids = (
-            db.query(models.TipRun.id)
-            .join(models.Meeting)
-            .filter(models.Meeting.date == target_date)
-            .filter(models.TipRun.source == preferred_source)
-            .all()
-        )
-        if source_ids:
-            ids = {r[0] for r in source_ids}
-            rows = (
-                db.query(models.Tip, models.Race, models.Meeting)
-                .join(models.Race, models.Tip.race_id == models.Race.id)
-                .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
-                .filter(models.Meeting.date == target_date)
-                .filter(models.Tip.tip_run_id.in_(ids))
-                .all()
-            )
-            break
+    gemini_ids = (
+        db.query(models.TipRun.id)
+        .join(models.Meeting)
+        .filter(models.Meeting.date == target_date)
+        .filter(models.TipRun.source == "Gemini")
+        .all()
+    )
 
-    if not rows:
-        # Final fallback — all tips regardless of source
+    if gemini_ids:
+        ids = {r[0] for r in gemini_ids}
         rows = (
             db.query(models.Tip, models.Race, models.Meeting)
             .join(models.Race, models.Tip.race_id == models.Race.id)
             .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
             .filter(models.Meeting.date == target_date)
+            .filter(models.Tip.tip_run_id.in_(ids))
             .all()
         )
+    else:
+        rows = []
 
     if not rows:
         return {

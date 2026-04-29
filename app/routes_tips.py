@@ -941,19 +941,9 @@ def list_tips(
     elif source is not None and source.lower() == "all":
         tip_runs = q.all()
     else:
-        # Default preference: Gemini → iReel (Clone is a separate signal, not default)
-        for preferred_source in ("Gemini", "iReel"):
-            source_q = db.query(models.TipRun).join(models.Meeting).filter(
-                models.Meeting.date == meeting_date,
-                models.TipRun.source == preferred_source,
-            )
-            if track_name:
-                source_q = source_q.filter(models.Meeting.track_name == track_name)
-            if state:
-                source_q = source_q.filter(models.Meeting.state == state)
-            tip_runs = source_q.all()
-            if tip_runs:
-                break
+        # Default: Gemini only
+        q = q.filter(models.TipRun.source == "Gemini")
+        tip_runs = q.all()
     results: list[schemas.MeetingTipsOut] = []
 
     for tr in tip_runs:
