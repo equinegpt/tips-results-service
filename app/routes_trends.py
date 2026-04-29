@@ -22,6 +22,10 @@ templates = Jinja2Templates(directory="templates")
 def api_trends(
     from_date: date_type | None = Query(None, alias="from"),
     to_date: date_type | None = Query(None, alias="to"),
+    source: str | None = Query(
+        "Gemini",
+        description="Filter tips by source: 'Gemini' (default), 'iReel', or 'all'.",
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -40,6 +44,7 @@ def api_trends(
         db=db,
         date_from=from_date,
         date_to=to_date,
+        source=source,
     )
 
 
@@ -48,6 +53,10 @@ def ui_trends(
     request: Request,
     from_date: date_type | None = Query(None),
     to_date: date_type | None = Query(None),
+    source: str | None = Query(
+        "Gemini",
+        description="Filter tips by source: 'Gemini' (default), 'iReel', or 'all'.",
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -64,6 +73,7 @@ def ui_trends(
         db=db,
         date_from=from_date,
         date_to=to_date,
+        source=source,
     )
 
     display_range = f"{from_date.strftime('%d %b %Y')} - {to_date.strftime('%d %b %Y')}"

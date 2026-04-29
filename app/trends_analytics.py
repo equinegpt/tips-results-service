@@ -110,39 +110,47 @@ class FlatResult:
     starting_price: Optional[float]
 
 
-def _fetch_tips_from_db(db: Session, d: date) -> List[FlatTip]:
+def _fetch_tips_from_db(
+    db: Session,
+    d: date,
+    source: Optional[str] = None,
+) -> List[FlatTip]:
     """
     Read tips directly from the local database for a single date.
     This is instant and reliable - no external API calls needed.
+
+    If `source` is provided (e.g. 'Gemini'), only tips from that
+    TipRun.source are returned. Pass None or 'all' for every provider.
     """
     tips: List[FlatTip] = []
 
-    # Query meetings for this date
-    meetings = db.query(models.Meeting).filter(models.Meeting.date == d).all()
+    rows = (
+        db.query(
+            models.Tip,
+            models.Race,
+            models.Meeting,
+        )
+        .join(models.Race, models.Tip.race_id == models.Race.id)
+        .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
+        .join(models.TipRun, models.Tip.tip_run_id == models.TipRun.id)
+        .filter(models.Meeting.date == d)
+    )
+    if source and source.lower() != "all":
+        rows = rows.filter(models.TipRun.source == source)
 
-    for meeting in meetings:
-        state = (meeting.state or "").upper()
-        track_name = meeting.track_name or ""
-
-        for race in meeting.races:
-            race_number = race.race_number
-            distance_m = race.distance_m
-            class_text = race.class_text
-            race_name = race.name
-
-            for tip in race.tips:
-                tips.append(FlatTip(
-                    meeting_date=d,
-                    state=state,
-                    track_name=track_name,
-                    race_number=race_number,
-                    tab_number=tip.tab_number,
-                    horse_name=tip.horse_name or f"#{tip.tab_number}",
-                    tip_type=tip.tip_type or "UNKNOWN",
-                    distance_m=distance_m,
-                    class_text=class_text,
-                    race_name=race_name,
-                ))
+    for tip, race, meeting in rows.all():
+        tips.append(FlatTip(
+            meeting_date=d,
+            state=(meeting.state or "").upper(),
+            track_name=meeting.track_name or "",
+            race_number=race.race_number,
+            tab_number=tip.tab_number,
+            horse_name=tip.horse_name or f"#{tip.tab_number}",
+            tip_type=tip.tip_type or "UNKNOWN",
+            distance_m=race.distance_m,
+            class_text=race.class_text,
+            race_name=race.name,
+        ))
 
     return tips
 
@@ -340,6 +348,7 @@ def compute_trends(
     db: Session,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    source: Optional[str] = "Gemini",
 ) -> Dict[str, Any]:
     """
     Compute comprehensive trend analysis across all dimensions.
@@ -349,6 +358,9 @@ def compute_trends(
     - Results: RA Crawler API /results?date=YYYY-MM-DD (cached)
 
     Matches tips to results using: (date, state, race_number, tab_number)
+
+    `source` filters tips by TipRun.source. Default 'Gemini'. Pass
+    'iReel' for iReel-only or 'all' to aggregate every provider.
     """
     # Default to last 60 days
     if date_to is None:
@@ -369,7 +381,7 @@ def compute_trends(
     day = date_from
     while day <= date_to:
         # Tips from database (instant)
-        tips = _fetch_tips_from_db(db, day)
+        tips = _fetch_tips_from_db(db, day, source=source)
 
         # Results from API (cached)
         results_cached = day in _results_cache and _is_cache_valid(_results_cache[day][0])

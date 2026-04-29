@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
 from .database import get_db
-from .models import Meeting, Race, Tip, TipOutcome
+from .models import Meeting, Race, Tip, TipOutcome, TipRun
 from .ra_results_client import RAResultsClient
 from .daily_generator import _tracks_match  # reuse the same fuzzy track matcher
 
@@ -195,6 +195,14 @@ def ui_overview(
         False,
         description="If true, return raw JSON instead of HTML.",
     ),
+    source: Optional[str] = Query(
+        "Gemini",
+        description=(
+            "Filter tips by source: 'Gemini' (default), 'iReel', or 'all'. "
+            "Aggregation excludes other providers so wins/strike-rate/ROI "
+            "reflect a single tip provider."
+        ),
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -216,14 +224,17 @@ def ui_overview(
     ra_index, ra_race_index = _build_ra_results_indexes(d_from, d_to)
 
     # 2) Fetch all tips + (optional) outcomes in that window
-    rows = (
+    q = (
         db.query(Tip, TipOutcome, Race, Meeting)
         .join(Race, Tip.race_id == Race.id)
         .join(Meeting, Race.meeting_id == Meeting.id)
+        .join(TipRun, Tip.tip_run_id == TipRun.id)
         .outerjoin(TipOutcome, TipOutcome.tip_id == Tip.id)
         .filter(Meeting.date >= d_from, Meeting.date <= d_to)
-        .all()
     )
+    if source and source.lower() != "all":
+        q = q.filter(TipRun.source == source)
+    rows = q.all()
     print(
         f"[OVR] raw rows (Tip+Outcome+Race+Meeting) in window "
         f"{d_from} → {d_to}: {len(rows)}"
