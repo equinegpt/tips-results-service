@@ -9,13 +9,14 @@ from __future__ import annotations
 import re
 import time
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 log = logging.getLogger(__name__)
 
-POLL_INTERVAL = 3     # seconds between polls
+POLL_INTERVAL = 1     # seconds between polls
 POLL_TIMEOUT = 120    # max wait for AI response
 
 
@@ -31,6 +32,7 @@ class GeminiClient:
         self.password = password
         self.token: Optional[str] = None
         self.refresh_token: Optional[str] = None
+        self._login_lock = threading.Lock()
 
     # ------------------------------------------------------------------ auth
     def login(self) -> None:
@@ -317,6 +319,161 @@ class GeminiClient:
             log.warning("[GeminiClient] Failed to parse line %r: %s", line, e)
             return None
 
+    # ------------------------------------------------- clone thin prompt
+    def build_thin_prompt_for_race(
+        self,
+        meeting: Any,
+        race: Any,
+        scratchings: List[int],
+        track_condition: Optional[str],
+        clone_picks: List[Dict[str, Any]],
+    ) -> str:
+        """
+        Build a commentary-only prompt for pre-selected clone picks.
+
+        clone_picks: [{tab_number, horse_name, role}] where role is
+        "AI Best", "Danger", or "Value".  Gemini only writes reasoning.
+        """
+        from datetime import date
+
+        meeting_date = self._get(meeting, "date")
+        if isinstance(meeting_date, date):
+            date_str = meeting_date.isoformat()
+        else:
+            date_str = str(meeting_date) if meeting_date else ""
+
+        track_name = (
+            self._get(meeting, "track_name", "")
+            or self._get(meeting, "track", "")
+            or ""
+        )
+        state = self._get(meeting, "state", "") or ""
+        meeting_id = (
+            self._get(meeting, "pf_meeting_id")
+            or self._get(meeting, "meeting_id")
+            or ""
+        )
+        race_number = (
+            self._get(race, "race_number")
+            or self._get(race, "race_no")
+            or "?"
+        )
+        race_name = self._get(race, "name") or self._get(race, "race_name") or ""
+        distance_m = (
+            self._get(race, "distance_m")
+            or self._get(race, "distance")
+            or None
+        )
+
+        msg = (
+            f"meetingId: {meeting_id} "
+            f"meeting: {track_name} ({state}) "
+            f"date: {date_str} "
+            f"raceNumber: {race_number} — {race_name}"
+        )
+        if distance_m:
+            msg += f" distance: {distance_m}m"
+        msg += "\n\n"
+
+        if scratchings:
+            tabs_str = ", ".join(f"#{t}" for t in sorted(scratchings))
+            msg += f"SCRATCHED: {tabs_str}\n"
+        if track_condition:
+            msg += f"Track condition: {track_condition}\n"
+        if scratchings or track_condition:
+            msg += "\n"
+
+        msg += (
+            "The selections for this race have already been made. "
+            "Write commentary for each pick.\n\n"
+        )
+
+        # List the picks
+        for pick in clone_picks:
+            msg += f"{pick['role']}: #{pick['tab_number']} {pick['horse_name']}\n"
+
+        msg += (
+            "\nFor each horse, retrieve the race data using the meetingId "
+            "and raceNumber, then write 2 sentences of pundit-style reasoning "
+            "citing specific form data (sectionals, barrier, distance/track "
+            "record, margins, jockey).\n\n"
+            "Output EXACTLY 3 lines:\n"
+        )
+        for pick in clone_picks:
+            msg += (
+                f"{pick['role']}: #{pick['tab_number']} "
+                f"**{pick['horse_name']}** — <reasoning>\n"
+            )
+
+        return msg
+
+    def generate_clone_race_tips(
+        self,
+        *,
+        meeting: Any,
+        race: Any,
+        scratchings: List[int],
+        track_condition: Optional[str],
+        clone_picks: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate commentary for pre-selected clone picks.
+
+        clone_picks: [{tab_number, horse_name, role}]
+        Returns tip dicts compatible with TipsBatchIn.
+        """
+        track_name = (
+            self._get(meeting, "track_name", "")
+            or self._get(meeting, "track", "")
+            or "?"
+        )
+        race_number = (
+            self._get(race, "race_number")
+            or self._get(race, "race_no")
+            or "?"
+        )
+
+        prompt = self.build_thin_prompt_for_race(
+            meeting=meeting,
+            race=race,
+            scratchings=scratchings or [],
+            track_condition=track_condition,
+            clone_picks=clone_picks,
+        )
+
+        log.info(
+            "[GeminiClient] Clone tips for %s R%s (thin prompt)",
+            track_name, race_number,
+        )
+
+        with self._login_lock:
+            if not self.token:
+                self.login()
+
+        meeting_date = self._get(meeting, "date", "")
+        title = f"Clone: {track_name} R{race_number} {meeting_date}"
+
+        conv = self._create_conversation(title=title, initial_message=prompt)
+        conv_id = conv.get("id")
+        if not conv_id:
+            log.error("[GeminiClient] Failed to create conversation")
+            return []
+
+        try:
+            response_text = self._poll_for_response(conv_id)
+            if not response_text:
+                return []
+
+            tips = self.parse_tips_text(response_text)
+            if not tips:
+                log.warning(
+                    "[GeminiClient] No tips parsed from: %s",
+                    response_text[:200],
+                )
+            return tips
+        finally:
+            self._delete_conversation(conv_id)
+
     # ---------------------------------------------------------- high-level
     def generate_race_tips(
         self,
@@ -358,9 +515,10 @@ class GeminiClient:
             track_name, race_number,
         )
 
-        # Ensure we're logged in
-        if not self.token:
-            self.login()
+        # Ensure we're logged in (thread-safe)
+        with self._login_lock:
+            if not self.token:
+                self.login()
 
         meeting_date = self._get(meeting, "date", "")
         title = f"Cron: {track_name} R{race_number} {meeting_date}"

@@ -122,6 +122,7 @@ def compute_day_stats(
     """
     q = (
         db.query(models.Tip, models.TipOutcome, models.Meeting)
+        .join(models.TipRun, models.Tip.tip_run_id == models.TipRun.id)
         .join(models.Race, models.Tip.race_id == models.Race.id)
         .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
         .outerjoin(
@@ -130,6 +131,7 @@ def compute_day_stats(
             & (models.TipOutcome.provider == provider),
         )
         .filter(models.Meeting.date == target_date)
+        .filter(models.TipRun.source == "Gemini")
     )
 
     if track_name:
@@ -176,6 +178,7 @@ def compute_range_stats(
     """
     q = (
         db.query(models.Tip, models.TipOutcome, models.Meeting)
+        .join(models.TipRun, models.Tip.tip_run_id == models.TipRun.id)
         .join(models.Race, models.Tip.race_id == models.Race.id)
         .join(models.Meeting, models.Race.meeting_id == models.Meeting.id)
         .outerjoin(
@@ -185,6 +188,7 @@ def compute_range_stats(
         )
         .filter(models.Meeting.date >= date_from)
         .filter(models.Meeting.date <= date_to)
+        .filter(models.TipRun.source == "Gemini")
     )
 
     if track_name:
