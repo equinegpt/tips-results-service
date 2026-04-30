@@ -669,6 +669,260 @@ def cron_generate_meeting_tips_gemini(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Gemini coverage sweep — fills race-level holes after generation
+# ──────────────────────────────────────────────────────────────────────
+
+@router.post("/cron/sweep-gemini-tips")
+def cron_sweep_gemini_tips(
+    date_str: str = Query(..., alias="date"),
+    force_all: bool = Query(
+        False,
+        description=(
+            "If true, sweep every meeting in scope (incl. Country). "
+            "Default: same M/P scope as the daily generator."
+        ),
+    ),
+    max_concurrent: int = Query(3, ge=1, le=10),
+    db: Session = Depends(get_db),
+):
+    """
+    Sweep all in-scope races for the date and fill any race-level holes
+    in Gemini coverage.
+
+    Source of truth = daily_generator's payload list (RA Crawler races
+    + scratchings + conditions, M/P filter). Does NOT depend on iReel
+    coverage as a reference.
+
+    For each race with no Gemini tips, calls gemini_client per race and
+    appends the tips to the meeting's existing Gemini TipRun (or creates
+    a new run tagged as a sweep patch when none exists yet).
+
+    Intended to run after the Gemini generation step in the daily cron
+    pipeline.
+    """
+    target_date = date_type.fromisoformat(date_str)
+    print(f"[SWEEP] Gemini sweep for {target_date} (force_all={force_all})")
+
+    payloads = daily_generator.build_generate_tips_payloads_for_date(
+        target_date=target_date,
+        project_id="gemini",
+        force_all_meetings=force_all,
+    )
+
+    races_expected = 0
+    races_present = 0
+    races_missing = 0
+    races_filled = 0
+    races_still_failing = 0
+    errors: list[dict[str, Any]] = []
+    per_meeting_report: list[dict[str, Any]] = []
+
+    for payload in payloads:
+        meeting_in = payload.meeting
+
+        # Locate the meeting row (may not exist yet for fresh meetings)
+        meeting_row: models.Meeting | None = None
+        pf_id = getattr(meeting_in, "pf_meeting_id", None)
+        if pf_id is not None:
+            meeting_row = (
+                db.query(models.Meeting)
+                .filter(models.Meeting.pf_meeting_id == pf_id)
+                .first()
+            )
+        if meeting_row is None:
+            meeting_row = (
+                db.query(models.Meeting)
+                .filter(
+                    models.Meeting.date == meeting_in.date,
+                    models.Meeting.track_name == meeting_in.track_name,
+                    models.Meeting.state == meeting_in.state,
+                )
+                .first()
+            )
+
+        # Race numbers that already have ≥1 Gemini tip across ANY Gemini TipRun
+        present_race_numbers: set[int] = set()
+        if meeting_row is not None:
+            covered = (
+                db.query(models.Race.race_number)
+                .join(models.Tip, models.Tip.race_id == models.Race.id)
+                .join(models.TipRun, models.Tip.tip_run_id == models.TipRun.id)
+                .filter(
+                    models.Race.meeting_id == meeting_row.id,
+                    models.TipRun.source == "Gemini",
+                )
+                .distinct()
+                .all()
+            )
+            present_race_numbers = {row[0] for row in covered}
+
+        # Identify missing races for this meeting
+        missing_race_ctxs = []
+        for race_ctx in payload.races:
+            races_expected += 1
+            rn = getattr(race_ctx.race, "race_number", None)
+            if rn is not None and rn in present_race_numbers:
+                races_present += 1
+            else:
+                races_missing += 1
+                missing_race_ctxs.append(race_ctx)
+
+        if not missing_race_ctxs:
+            continue
+
+        print(
+            f"[SWEEP] {meeting_in.track_name} ({meeting_in.state}): "
+            f"{len(missing_race_ctxs)} race(s) missing Gemini tips"
+        )
+
+        def _generate_one(ctx):
+            r = ctx.race
+            try:
+                tips = gemini_client.generate_race_tips(
+                    meeting=meeting_in,
+                    race=r,
+                    scratchings=ctx.scratchings or [],
+                    track_condition=ctx.track_condition,
+                )
+                return r, tips, None
+            except Exception as exc:
+                return r, [], str(exc)
+
+        new_race_entries: list[tuple[Any, list[dict]]] = []
+        meeting_errors: list[dict[str, Any]] = []
+
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = [executor.submit(_generate_one, c) for c in missing_race_ctxs]
+            for fut in as_completed(futures):
+                race_in, tips, err = fut.result()
+                rn = getattr(race_in, "race_number", "?")
+                if err:
+                    meeting_errors.append({
+                        "track": meeting_in.track_name,
+                        "state": meeting_in.state,
+                        "race_number": rn,
+                        "error": err,
+                    })
+                if tips:
+                    new_race_entries.append((race_in, tips))
+                else:
+                    races_still_failing += 1
+
+        if not new_race_entries:
+            errors.extend(meeting_errors)
+            per_meeting_report.append({
+                "track": meeting_in.track_name,
+                "state": meeting_in.state,
+                "races_expected": len(payload.races),
+                "races_present_before": len(present_race_numbers),
+                "races_filled": 0,
+                "races_still_failing": len(missing_race_ctxs),
+            })
+            continue
+
+        # Upsert the Meeting row if it was new
+        if meeting_row is None:
+            meeting_row = models.Meeting(
+                date=meeting_in.date,
+                track_name=meeting_in.track_name,
+                state=meeting_in.state,
+                country=getattr(meeting_in, "country", None),
+                pf_meeting_id=pf_id,
+                ra_meetcode=getattr(meeting_in, "ra_meetcode", None),
+            )
+            db.add(meeting_row)
+            db.flush()
+
+        # Locate-or-create the canonical Gemini TipRun for this meeting
+        gemini_run = (
+            db.query(models.TipRun)
+            .filter(
+                models.TipRun.meeting_id == meeting_row.id,
+                models.TipRun.source == "Gemini",
+            )
+            .order_by(models.TipRun.created_at.asc())
+            .first()
+        )
+        if gemini_run is None:
+            gemini_run = models.TipRun(
+                source="Gemini",
+                model_version="gemini-stablfy-v1",
+                meeting_id=meeting_row.id,
+                meta={
+                    "generated_by": "cron_sweep_gemini_tips",
+                    "is_sweep_patch": True,
+                },
+            )
+            db.add(gemini_run)
+            db.flush()
+        else:
+            meta = dict(gemini_run.meta or {})
+            meta["sweep_patches"] = int(meta.get("sweep_patches", 0)) + 1
+            meta["last_sweep_at"] = target_date.isoformat()
+            gemini_run.meta = meta
+
+        for race_in, tip_dicts in new_race_entries:
+            race_row = (
+                db.query(models.Race)
+                .filter(
+                    models.Race.meeting_id == meeting_row.id,
+                    models.Race.race_number == race_in.race_number,
+                )
+                .first()
+            )
+            if race_row is None:
+                race_row = models.Race(
+                    meeting_id=meeting_row.id,
+                    race_number=race_in.race_number,
+                    name=getattr(race_in, "name", None),
+                    distance_m=getattr(race_in, "distance_m", None),
+                    class_text=getattr(race_in, "class_text", None),
+                    scheduled_start=getattr(race_in, "scheduled_start", None),
+                )
+                db.add(race_row)
+                db.flush()
+
+            for t in tip_dicts:
+                tip = models.Tip(
+                    race_id=race_row.id,
+                    tip_run_id=gemini_run.id,
+                    tip_type=t.get("tip_type"),
+                    tab_number=t.get("tab_number"),
+                    horse_name=t.get("horse_name"),
+                    reasoning=t.get("reasoning"),
+                    stake_units=t.get("stake_units", 1.0),
+                )
+                db.add(tip)
+            races_filled += 1
+
+        db.commit()
+
+        if meeting_errors:
+            errors.extend(meeting_errors)
+        per_meeting_report.append({
+            "track": meeting_in.track_name,
+            "state": meeting_in.state,
+            "races_expected": len(payload.races),
+            "races_present_before": len(present_race_numbers),
+            "races_filled": len(new_race_entries),
+            "races_still_failing": len(missing_race_ctxs) - len(new_race_entries),
+        })
+
+    return {
+        "date": target_date.isoformat(),
+        "force_all": force_all,
+        "meetings_scanned": len(payloads),
+        "races_expected": races_expected,
+        "races_present": races_present,
+        "races_missing": races_missing,
+        "races_filled": races_filled,
+        "races_still_failing": races_still_failing,
+        "meetings": per_meeting_report,
+        "errors": errors,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Clone + Gemini thin-prompt endpoint
 # ──────────────────────────────────────────────────────────────────────
 
