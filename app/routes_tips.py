@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as date_type
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from .database import get_db
@@ -1157,6 +1157,7 @@ def cron_generate_meeting_tips_clone(
 
 @router.get("/tips", response_model=list[schemas.MeetingTipsOut])
 def list_tips(
+    response: Response,
     meeting_date: date_type = Query(..., alias="date"),
     track_name: str | None = None,
     state: str | None = None,
@@ -1164,8 +1165,7 @@ def list_tips(
         default=None,
         description=(
             "Filter by tip source: 'iReel', 'Gemini', or 'all'. "
-            "Defaults to 'iReel' so existing app builds are not affected. "
-            "Pass source=all to get both providers."
+            "Default: Gemini only. Pass source=all to get every provider."
         ),
     ),
     db: Session = Depends(get_db),
@@ -1174,10 +1174,14 @@ def list_tips(
     List tip runs (and tips) for a given date, optionally filtered
     by track_name, state, and/or source.
 
-    IMPORTANT: defaults to source=iReel to protect existing app builds
-    that don't expect multiple tip runs per meeting. Pass source=all
-    or source=Gemini explicitly to get other providers.
+    Default source is Gemini. Pass source=all or source=iReel to override.
     """
+    # Tips are time-sensitive (cron may regenerate during the day; sweep
+    # may patch missing races). Forbid client-side caching so iOS
+    # URLCache cannot serve a stale early-morning response after tips
+    # are added later in the day.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     q = db.query(models.TipRun).join(models.Meeting)
     q = q.filter(models.Meeting.date == meeting_date)
 
