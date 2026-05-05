@@ -67,6 +67,23 @@ def _fetch_ra_results_from_crawler(target_date: date) -> List[Dict[str, Any]]:
             resp = client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
+
+            # Self-heal: if crawler returned empty, trigger refresh and retry once
+            empty = (
+                (isinstance(data, list) and len(data) == 0)
+                or (isinstance(data, dict) and not (data.get("meetings") or data.get("data") or data.get("results")))
+            )
+            if empty:
+                print(f"[RA] empty results for {target_date}, triggering /results/refresh")
+                try:
+                    refresh_resp = client.post(f"{base}/results/refresh", params=params, timeout=90.0)
+                    refresh_resp.raise_for_status()
+                    print(f"[RA] refresh ok, re-fetching results")
+                    resp2 = client.get(url, params=params, timeout=60.0)
+                    resp2.raise_for_status()
+                    data = resp2.json()
+                except Exception as re:
+                    print(f"[RA] refresh failed: {re}")
     except Exception as e:
         print(f"[RA] error fetching results from crawler: {e}")
         return []
