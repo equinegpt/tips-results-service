@@ -107,6 +107,41 @@ def _aggs_to_tip_type_stats(
     return stats_out
 
 
+def _abandoned_meeting_ids(db: Session, target_date: date) -> set[str]:
+    """
+    Return meeting IDs for meetings on `target_date` that have NO race results
+    at all. Treated as abandoned (only valid when date is in the past).
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo("Australia/Melbourne")).date()
+    if target_date >= today:
+        return set()  # Don't mark today/future meetings as abandoned
+
+    # Find meetings on target_date
+    meetings = db.query(models.Meeting.id).filter(models.Meeting.date == target_date).all()
+    meeting_ids = {m[0] for m in meetings}
+
+    if not meeting_ids:
+        return set()
+
+    # Find meetings that have AT LEAST ONE race result with finish_position set
+    meetings_with_results = (
+        db.query(models.Meeting.id)
+        .join(models.Race, models.Race.meeting_id == models.Meeting.id)
+        .join(models.RaceResult, models.RaceResult.race_id == models.Race.id)
+        .filter(models.Meeting.date == target_date)
+        .filter(models.RaceResult.finish_position.isnot(None))
+        .distinct()
+        .all()
+    )
+    with_results_ids = {m[0] for m in meetings_with_results}
+
+    # Abandoned = on date but with no results
+    return meeting_ids - with_results_ids
+
+
 def compute_day_stats(
     db: Session,
     target_date: date,
@@ -119,7 +154,10 @@ def compute_day_stats(
     Compute per-tip-type stats for a given date.
 
     Optionally filter to a specific meeting by track_name / state.
+    Excludes abandoned meetings (past date with zero results).
     """
+    abandoned = _abandoned_meeting_ids(db, target_date)
+
     q = (
         db.query(models.Tip, models.TipOutcome, models.Meeting)
         .join(models.TipRun, models.Tip.tip_run_id == models.TipRun.id)
@@ -134,6 +172,8 @@ def compute_day_stats(
         .filter(models.TipRun.source == "Gemini")
     )
 
+    if abandoned:
+        q = q.filter(~models.Meeting.id.in_(abandoned))
     if track_name:
         q = q.filter(models.Meeting.track_name == track_name)
     if state:
@@ -176,6 +216,14 @@ def compute_range_stats(
       - track_name: limit to one track (e.g. only Flemington)
       - state: limit to a state (e.g. only VIC meetings)
     """
+    # Exclude abandoned meetings across the range
+    from datetime import timedelta
+    abandoned: set[str] = set()
+    cur = date_from
+    while cur <= date_to:
+        abandoned |= _abandoned_meeting_ids(db, cur)
+        cur += timedelta(days=1)
+
     q = (
         db.query(models.Tip, models.TipOutcome, models.Meeting)
         .join(models.TipRun, models.Tip.tip_run_id == models.TipRun.id)
@@ -191,6 +239,8 @@ def compute_range_stats(
         .filter(models.TipRun.source == "Gemini")
     )
 
+    if abandoned:
+        q = q.filter(~models.Meeting.id.in_(abandoned))
     if track_name:
         q = q.filter(models.Meeting.track_name == track_name)
     if state:

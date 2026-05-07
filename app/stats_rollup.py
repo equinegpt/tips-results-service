@@ -1,9 +1,10 @@
 # app/stats_rollup.py
 from __future__ import annotations
 
-from datetime import date as date_type
+from datetime import date as date_type, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -266,6 +267,16 @@ def compute_day_rollup(
     # --------------------------------------------------
     meetings: Dict[str, Dict[str, Any]] = {}
 
+    # Track which meetings have any race results at all (for abandoned detection)
+    meetings_with_results: set[str] = set()
+    for (race_id, _tab), rr in rr_index.items():
+        if rr.finish_position is not None:
+            # Find the meeting_id for this race
+            for (meeting_id, r_id), stats in race_stats.items():
+                if r_id == race_id:
+                    meetings_with_results.add(meeting_id)
+                    break
+
     for (meeting_id, race_id), stats in race_stats.items():
         m = meetings.get(meeting_id)
         if m is None:
@@ -273,6 +284,7 @@ def compute_day_rollup(
                 "meeting_id": stats["meeting_id"],
                 "track_name": stats["track_name"],
                 "state": stats["state"],
+                "abandoned": False,  # filled below
                 "races": [],
                 "totals": {
                     "tips_total": 0,
@@ -300,8 +312,10 @@ def compute_day_rollup(
         if stats["trifecta_hit"]:
             mt["trifectas"] += 1
 
-    # Meeting-level strike %
-    for m in meetings.values():
+    # Meeting-level strike % + abandoned flag
+    today = datetime.now(ZoneInfo("Australia/Melbourne")).date()
+    is_past_date = target_date < today
+    for meeting_id, m in meetings.items():
         mt = m["totals"]
         if mt["tips_total"] > 0:
             mt["success_pct"] = (
@@ -309,6 +323,13 @@ def compute_day_rollup(
             ) * 100.0
         else:
             mt["success_pct"] = 0.0
+
+        # A meeting is abandoned if:
+        #  - The date is in the past (so all races would have run by now)
+        #  - AND we had tips for it
+        #  - AND it has zero race results across all races
+        if is_past_date and mt["tips_total"] > 0 and meeting_id not in meetings_with_results:
+            m["abandoned"] = True
 
     # --------------------------------------------------
     # 6) Day-level totals
@@ -325,6 +346,9 @@ def compute_day_rollup(
     }
 
     for m in meetings.values():
+        # Exclude abandoned meetings from day totals (no point counting tips for races that never ran)
+        if m.get("abandoned"):
+            continue
         mt = m["totals"]
         day_totals["tips_total"] += mt["tips_total"]
         day_totals["wins"] += mt["wins"]
