@@ -27,8 +27,44 @@ from .pf_results import (
     _to_int,
     _to_decimal,
 )
+from . import cas_fill
 
 router = APIRouter()
+
+
+@router.post("/cron/fill-cas-fallback")
+def cron_fill_cas_fallback(
+    target_date: date_type | None = Query(
+        None,
+        alias="date",
+        description=(
+            "Date to fill CAS fallback tips for (YYYY-MM-DD). "
+            "If omitted, uses *today* in Australia/Melbourne."
+        ),
+    ),
+    force: bool = Query(
+        False,
+        description="Overwrite existing CAS entries (default: skip races that already have one).",
+    ),
+):
+    """
+    For every race on the given date that doesn't already have a CAS Top3,
+    synthesise one from upstream model rankings and write it to CAS.
+
+    This is the fallback path that ensures the apps can return tips for races
+    that the daily Gemini cron didn't cover (Country meetings, etc.). The
+    apps see these as ordinary CAS hits and never invoke live Gemini.
+    """
+    if target_date is None:
+        target_date = datetime.now(ZoneInfo("Australia/Melbourne")).date()
+
+    summary = cas_fill.fill_cas_for_date(target_date, force=force)
+    return {
+        "ok": True,
+        "date": target_date.isoformat(),
+        "force": force,
+        **summary,
+    }
 
 
 @router.post("/cron/fetch-ra-results")
