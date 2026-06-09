@@ -80,13 +80,14 @@ def compute_day_rollup(
     stake_dec = _safe_decimal(stake_per_tip)
 
     # --------------------------------------------------
-    # 1) Fetch Gemini tips for the day
+    # 1) Fetch tips for the day from the active source
+    #    (env-var TIPS_DEFAULT_SOURCE — defaults to "Gemini").
     # --------------------------------------------------
     gemini_ids = (
         db.query(models.TipRun.id)
         .join(models.Meeting)
         .filter(models.Meeting.date == target_date)
-        .filter(models.TipRun.source == "Gemini")
+        .filter(models.TipRun.source == settings.tips_default_source)
         .all()
     )
 

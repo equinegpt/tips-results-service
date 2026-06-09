@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     stablfy_username: str = ""
     stablfy_password: str = ""
 
+    # Default tip source for app-facing endpoints (/tips, /stats/day,
+    # /stats/range, /debug/day-summary). Flip this to "iReel" via env var to
+    # temporarily route the apps away from Gemini (e.g. during a Gemini
+    # outage or credit gap). Restore to "Gemini" when ready.
+    tips_default_source: str = "Gemini"
+
     # Pydantic settings config
     model_config = SettingsConfigDict(
         env_file=".env",

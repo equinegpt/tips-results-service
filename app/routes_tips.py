@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from . import schemas, models, daily_generator
 from .clients import ireel_client, gemini_client
+from .config import settings
 
 router = APIRouter()
 
@@ -1190,17 +1191,16 @@ def list_tips(
     if state:
         q = q.filter(models.Meeting.state == state)
 
-    # Prefer Gemini tips, fall back to iReel if no Gemini tips exist.
-    # Pass source=iReel or source=Gemini to force one provider,
-    # or source=all to get both.
+    # Default source is controlled by settings.tips_default_source
+    # (env var TIPS_DEFAULT_SOURCE). Apps can override with ?source=iReel,
+    # ?source=Gemini, or ?source=all.
     if source is not None and source.lower() != "all":
         q = q.filter(models.TipRun.source == source)
         tip_runs = q.all()
     elif source is not None and source.lower() == "all":
         tip_runs = q.all()
     else:
-        # Default: Gemini only
-        q = q.filter(models.TipRun.source == "Gemini")
+        q = q.filter(models.TipRun.source == settings.tips_default_source)
         tip_runs = q.all()
     results: list[schemas.MeetingTipsOut] = []
 

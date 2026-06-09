@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from . import models, schemas
+from .config import settings
 
 
 @dataclass
@@ -169,7 +170,7 @@ def compute_day_stats(
             & (models.TipOutcome.provider == provider),
         )
         .filter(models.Meeting.date == target_date)
-        .filter(models.TipRun.source == "Gemini")
+        .filter(models.TipRun.source == settings.tips_default_source)
     )
 
     if abandoned:
@@ -236,7 +237,7 @@ def compute_range_stats(
         )
         .filter(models.Meeting.date >= date_from)
         .filter(models.Meeting.date <= date_to)
-        .filter(models.TipRun.source == "Gemini")
+        .filter(models.TipRun.source == settings.tips_default_source)
     )
 
     if abandoned:
