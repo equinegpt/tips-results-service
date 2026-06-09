@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import date as date_type
 from typing import Any, Dict, List, Optional, Tuple
@@ -108,30 +107,22 @@ def fetch_skynet_picks_for_date(target_date: date_type) -> Dict[Tuple[int, int],
 
 def _build_top3_payload(runners: List[Dict[str, Any]]) -> Optional[str]:
     """
-    From a sorted (by rank) list of runners, build a Top3 JSON payload
-    matching what the apps expect from CAS.
+    From a sorted (by rank) list of runners, build a Top3 payload in the
+    canonical text format used by the daily Gemini cron and parsed by
+    both the iOS and Flutter apps:
+
+        AI Best: #<tab> **<horse>** — <reason>
+        Danger: #<tab> **<horse>** — <reason>
+        Value: #<tab> **<horse>** — <reason>
     """
     if len(runners) < 3:
         return None
 
-    top3 = {
-        "aiBest": {
-            "tab": runners[0]["tab"],
-            "horse": runners[0]["horse"],
-            "reason": _REASON_AI_BEST,
-        },
-        "danger": {
-            "tab": runners[1]["tab"],
-            "horse": runners[1]["horse"],
-            "reason": _REASON_DANGER,
-        },
-        "value": {
-            "tab": runners[2]["tab"],
-            "horse": runners[2]["horse"],
-            "reason": _REASON_VALUE,
-        },
-    }
-    return json.dumps(top3)
+    return (
+        f"AI Best: #{runners[0]['tab']} **{runners[0]['horse']}** — {_REASON_AI_BEST}\n"
+        f"Danger: #{runners[1]['tab']} **{runners[1]['horse']}** — {_REASON_DANGER}\n"
+        f"Value: #{runners[2]['tab']} **{runners[2]['horse']}** — {_REASON_VALUE}"
+    )
 
 
 def fill_cas_for_date(
