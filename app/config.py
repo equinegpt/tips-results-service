@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # outage or credit gap). Restore to "Gemini" when ready.
     tips_default_source: str = "Gemini"
 
+    # Outage alias for /tips: when set, GET /tips?source=Gemini is rewritten
+    # to the alias value (e.g. "iReel"). Lets us redirect existing app
+    # builds that hardcode source=Gemini without shipping a client release.
+    # Unset (None) = no rewrite, default behaviour.
+    gemini_alias_source: str | None = None
+
     # Pydantic settings config
     model_config = SettingsConfigDict(
         env_file=".env",

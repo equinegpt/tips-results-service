@@ -1191,6 +1191,17 @@ def list_tips(
     if state:
         q = q.filter(models.Meeting.state == state)
 
+    # Gemini outage alias: if settings.gemini_alias_source is set, rewrite
+    # incoming ?source=Gemini requests to the alias target (e.g. "iReel").
+    # Used to redirect existing app builds during a Gemini outage without
+    # shipping a client release. Clear the env var to restore.
+    if (
+        source is not None
+        and source.lower() == "gemini"
+        and settings.gemini_alias_source
+    ):
+        source = settings.gemini_alias_source
+
     # Default source is controlled by settings.tips_default_source
     # (env var TIPS_DEFAULT_SOURCE). Apps can override with ?source=iReel,
     # ?source=Gemini, or ?source=all.
