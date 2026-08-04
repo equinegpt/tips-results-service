@@ -37,8 +37,8 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.analyst import score_race, select_tips, reasoning_line  # noqa: E402
 
-SOURCE = "8F"
-MODEL_VERSION = "v1.0-fitted-20260804"
+SOURCE = "Geoff"
+MODEL_VERSION = "geoff-v1.0-fitted-20260804"
 SCRATCHINGS_URL = os.environ.get(
     "SCRATCHINGS_URL", "https://pf-scratchings-conditions.onrender.com")
 
