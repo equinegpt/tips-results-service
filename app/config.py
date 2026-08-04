@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     ra_crawler_base_url: str = "https://ra-crawler.onrender.com"
     pf_scratchings_base_url: str = "https://pf-scratchings-conditions.onrender.com"
 
+    # PunctingForm /v2/form API key, used to resolve pf_meeting_id from
+    # (date, track, state) via meetingslist. (Distinct from the SkyNet key.)
+    # pf_meeting_resolver reads PF_API_KEY from the environment directly;
+    # this field just documents/validates it as a known setting.
+    pf_api_key: str | None = None
+
     # iReel config
     ireel_api_key: str | None = None
     ireel_api_base_url: str = "https://api.ireel.ai"

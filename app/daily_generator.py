@@ -9,7 +9,7 @@ import httpx
 from zoneinfo import ZoneInfo
 
 from .config import settings
-from . import schemas
+from . import schemas, pf_meeting_resolver
 
 
 def today_mel() -> date:
@@ -470,6 +470,25 @@ def build_generate_tips_payloads_for_date(
                         f"[PFID] unable to coerce RA meetingId={ra_mid!r} "
                         f"to int for {track_name} {state} on {meeting_date}"
                     )
+
+        # If RA/PF fields didn't yield an id, resolve from PF's authoritative
+        # meetingslist by (date, track, state). RA /races now returns
+        # meetingId=null and SkyNet returns 0, so this is the reliable source.
+        # Soft-fails to None → same behaviour as before.
+        if pf_meeting_id is None:
+            try:
+                resolved = pf_meeting_resolver.resolve_one(
+                    meeting_date, track_name, state
+                )
+            except Exception as e:  # noqa: BLE001
+                resolved = None
+                print(f"[PFID] resolver error for {track_name} {state}: {e}")
+            if resolved is not None:
+                pf_meeting_id = resolved
+                print(
+                    f"[PFID] resolved pf_meeting_id={pf_meeting_id} via PF "
+                    f"meetingslist for {track_name} {state} on {meeting_date}"
+                )
 
         if pf_meeting_id is None:
             print(

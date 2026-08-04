@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from . import schemas, models, daily_generator
+from . import schemas, models, daily_generator, pf_meeting_resolver
 from .clients import ireel_client, gemini_client
 from .config import settings
 
@@ -1215,8 +1215,32 @@ def list_tips(
         tip_runs = q.all()
     results: list[schemas.MeetingTipsOut] = []
 
+    # Backfill any missing pf_meeting_id from PF's authoritative meetingslist.
+    # The apps match tip meetings to their selected meeting by pf_meeting_id;
+    # when it's null (RA /races meetingId=null, SkyNet meetingId=0) the apps
+    # silently drop every tip. Resolve on read and persist so the row is fixed
+    # permanently. Soft-fails: if PF can't be reached the id stays null and
+    # behaviour is unchanged. Map is fetched lazily + cached only if needed.
+    resolver_map: dict | None = None
+    healed_meeting_ids: set = set()
+
     for tr in tip_runs:
         meeting = tr.meeting
+
+        if meeting.pf_meeting_id is None and meeting.id not in healed_meeting_ids:
+            if resolver_map is None:
+                resolver_map = pf_meeting_resolver.resolve_pf_meeting_ids(meeting_date)
+            resolved = pf_meeting_resolver.lookup_pf_meeting_id(
+                resolver_map, meeting.track_name, meeting.state
+            )
+            if resolved is not None:
+                meeting.pf_meeting_id = resolved
+                healed_meeting_ids.add(meeting.id)
+                print(
+                    f"[PFRESOLVE] backfilled pf_meeting_id={resolved} for "
+                    f"{meeting.track_name} ({meeting.state}) on {meeting_date}"
+                )
+
         races_with_tips: list[schemas.RaceWithTipsOut] = []
 
         for race in meeting.races:
@@ -1244,6 +1268,16 @@ def list_tips(
                     races=races_with_tips,
                 )
             )
+
+    # Persist backfilled pf_meeting_id so future reads (and stats joins) are
+    # clean. Best-effort: never fail the response if the write can't commit —
+    # the resolved ids are already in the response objects above.
+    if healed_meeting_ids:
+        try:
+            db.commit()
+        except Exception as e:  # noqa: BLE001
+            db.rollback()
+            print(f"[PFRESOLVE] persist failed (response still ok): {e}")
 
     return results
 
