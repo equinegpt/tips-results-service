@@ -167,7 +167,9 @@ def main() -> int:
     trs = None
     tcur = None
     if args.commit:
-        trs = psycopg2.connect(os.environ["TRS_DATABASE_URL"], connect_timeout=20)
+        trs = psycopg2.connect(
+            os.environ.get("TRS_DATABASE_URL") or os.environ["DATABASE_URL"],
+            connect_timeout=20)  # on the TRS box, DATABASE_URL IS the TRS DB
         tcur = trs.cursor()
 
     scr = fetch_scratchings(day)
