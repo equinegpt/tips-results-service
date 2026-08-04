@@ -29,18 +29,23 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-# Cascade weights — ratios encode priority dominance. Sectionals carry
-# more weight than the next three components combined, per the spec's
-# "SECTIONALS WIN" rule.
+# Cascade weights — FITTED 2026-08-04 (scripts/analyst_tune.py):
+# per-race conditional logit on the TUNE window (Apr 1–May 31, 1,840
+# races), validated on the untouched Jun–Aug holdout: 22.4% strike /
+# −11.3% ROI@SP vs 19.9% / −17.7% for the original hand weights.
+# The data kept sectionals dominant but promoted connections, track
+# record and conditions well above the prompt's hand-guessed order.
+# speed (meeting ranks) fitted ~0 — collinear with sectionals — and is
+# clamped to 0 rather than carrying its slightly negative fit.
 W = {
     "sect": 4.0,
-    "speed": 2.0,
-    "map": 1.0,
-    "dist": 0.8,
-    "track": 0.6,
-    "cond": 0.6,
-    "trend": 0.4,
-    "conn": 0.2,
+    "speed": 0.0,
+    "map": 1.9,
+    "dist": 0.9,
+    "track": 2.1,
+    "cond": 1.45,
+    "trend": 0.3,
+    "conn": 2.3,
 }
 RECENCY = (1.0, 0.6, 0.4)          # last 3 runs, newest first
 SHRINK = 4                          # record-rate shrinkage (small samples)
