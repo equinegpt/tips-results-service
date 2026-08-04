@@ -86,7 +86,7 @@ def load_races(scur, day: str, live: bool):
     return scur.fetchall()
 
 
-def upsert_meeting(tcur, day, pl):
+def upsert_meeting(tcur, day, pl, pf_meeting_id=None):
     meeting = (pl.get("meeting") or {})
     track = (meeting.get("track") or {})
     name = track.get("name") or "Unknown"
@@ -101,7 +101,7 @@ def upsert_meeting(tcur, day, pl):
                                          EXCLUDED.pf_meeting_id),
                 updated_at = now()
         RETURNING id""",
-        (str(uuid.uuid4()), day, name, state, country, None))
+        (str(uuid.uuid4()), day, name, state, country, pf_meeting_id))
     return tcur.fetchone()[0], name
 
 
@@ -202,7 +202,7 @@ def main() -> int:
             for tt, (e, reason) in lines.items():
                 print(f"  {tt}: #{e['tab_number']} {e['horse_name']} — {reason}")
         else:
-            m_uuid, _ = upsert_meeting(tcur, day, pl)
+            m_uuid, _ = upsert_meeting(tcur, day, pl, pf_meeting_id=mid)
             r_uuid = upsert_race(tcur, m_uuid, rn, pl)
             run_id = get_or_create_run(tcur, m_uuid, mid)
             for tt, (e, reason) in lines.items():
