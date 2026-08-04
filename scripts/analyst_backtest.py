@@ -36,12 +36,20 @@ TUNE_END = date(2026, 5, 31)          # <= this: TUNE; after: HOLDOUT
 
 # RA results carry sponsor-prefixed track names; PF payloads don't.
 SPONSORS = ("sportsbet", "ladbrokes", "bet365", "tabtouch", "picklebet",
-            "aquis", "thomasfarms", "southside", "royal", "hygain", "tab")
+            "aquis", "thomasfarmsrc", "thomasfarms", "southside", "royal",
+            "hygain", "tab")
 
 
-# PF name -> RA name where they genuinely differ (validation week found
-# Fannie Bay = Darwin's track name on the PF side; RA says Darwin).
-ALIASES = {"fanniebay": "darwin"}
+# PF name -> RA name where they genuinely differ (found by full-run
+# unmatched report + ra_results DISTINCT track survey).
+ALIASES = {
+    "fanniebay": "darwin",
+    "cairns": "cannonpark",              # RA: Ladbrokes Cannon Park
+    "mtgambier": "mountgambier",
+    "mtisa": "mountisa",
+    "devonportsynthetic": "devonporttapetasynthetic",
+    "murraybridgegh": "murraybridge",
+}
 
 
 def norm(t: str) -> str:
@@ -76,6 +84,16 @@ def main() -> int:
     w = csv.writer(fout)
     w.writerow(["date", "pf_meeting_id", "track", "race", "tip_type",
                 "tab", "horse", "fin", "sp", "void"])
+    # Optional runner-level feature dump: lets the tuner iterate weight
+    # fits in-memory instead of re-fetching 100 days of payloads per trial.
+    fw = None
+    feat_path = os.environ.get("FEATURES_CSV")
+    if feat_path:
+        ffout = open(feat_path, "w", newline="")
+        fw = csv.writer(ffout)
+        fw.writerow(["date", "pf_meeting_id", "race", "tab",
+                     "z_sect", "z_speed", "z_map", "z_dist", "z_track",
+                     "z_cond", "z_trend", "z_conn", "raw_sect", "won", "sp"])
 
     unmatched_tracks = defaultdict(int)
     day = start
@@ -112,6 +130,17 @@ def main() -> int:
                 scored = score_race(p, scratched=scr_tabs)
                 if len(scored) < 4:
                     continue
+                if fw is not None:
+                    for e in scored:
+                        res_ = ra[key].get((rn, e["tab_number"]))
+                        if res_ is None or res_[2] or res_[0] is None or res_[1] <= 0:
+                            continue
+                        fw.writerow([iso, mid, rn, e["tab_number"],
+                                     *(e["z"][k] for k in
+                                       ("sect", "speed", "map", "dist", "track",
+                                        "cond", "trend", "conn")),
+                                     e["raw"]["sect"] if e["raw"]["sect"] is not None else "",
+                                     1 if res_[0] == 1 else 0, res_[1]])
                 tips = select_tips(scored)
                 n_races += 1
                 for tip_type, entry in (("AI_BEST", tips.get("ai_best")),
@@ -130,6 +159,8 @@ def main() -> int:
             print(f"[bt] ...{iso}: {n_races} races so far", flush=True)
         day += timedelta(days=1)
     fout.close()
+    if fw is not None:
+        ffout.close()
     shared.close()
     print(f"[bt] generated tips for {n_races} races across {n_days} days -> {csv_path}")
     if unmatched_tracks:

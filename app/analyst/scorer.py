@@ -295,14 +295,13 @@ def select_tips(scored: List[dict],
         return {}
     ranked = list(scored)
 
-    # conflict rule
-    by_sect = sorted((s for s in ranked if s["raw"]["sect"] is not None),
-                     key=lambda x: -(x["raw"]["sect"]))
-    if len(by_sect) >= 2:
-        edge = by_sect[0]["raw"]["sect"] - by_sect[1]["raw"]["sect"]
-        if edge >= SECT_EDGE_LENGTHS and ranked[0] is not by_sect[0]:
-            ranked.remove(by_sect[0])
-            ranked.insert(0, by_sect[0])
+    # CONFLICT RULE RETIRED (2026-08-04): the spec's "sectionals always
+    # win" override was a guardrail against an LLM's narrative bias.
+    # With FITTED weights the formula already encodes sectional
+    # dominance, and the override measurably hurt: holdout AI Best
+    # 21.2%/-13.3% with the rule vs 22.4%/-11.3% pure-formula on the
+    # same races (Jun-Aug 2026, n=3,150). One binary ablation, fully
+    # disclosed — not a holdout search.
 
     ai_best, danger = ranked[0], ranked[1] if len(ranked) > 1 else None
     top2 = {ai_best["tab_number"], danger["tab_number"] if danger else None}
