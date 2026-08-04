@@ -40,7 +40,13 @@ def main():
                                       ORDER BY run_ts DESC) AS rn
             FROM shadow_predictions
             WHERE model_name = 'rank_v1' AND predicted_rank = 1
-              AND meeting_date::date BETWEEN %s AND %s)
+              AND meeting_date::date BETWEEN %s AND %s
+              -- PRE-RACE ONLY (2026-08-04 check-1 failure): weekly
+              -- retrain walk-forward writes POST-RACE rescores; the
+              -- naive "latest run" was almost all post-dated. As-shipped
+              -- = last run before race-day 09:00 AEST (23:00Z day prior).
+              AND run_ts::timestamptz <=
+                  ((meeting_date::date - interval '1 day') + interval '23 hours') AT TIME ZONE 'UTC')
         SELECT d, meeting_id, race_number, tab_number FROM latest WHERE rn = 1""",
         (start, end))
     clone_r1 = {(str(d), int(m), int(r)): int(t) for d, m, r, t in scur.fetchall()}
