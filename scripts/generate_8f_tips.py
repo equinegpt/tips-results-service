@@ -32,12 +32,38 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import psycopg2
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.analyst import score_race, select_tips, reasoning_line  # noqa: E402
 
 SOURCE = "8F"
 MODEL_VERSION = "v1.0-fitted-20260804"
+SCRATCHINGS_URL = os.environ.get(
+    "SCRATCHINGS_URL", "https://pf-scratchings-conditions.onrender.com")
+
+
+def fetch_scratchings(day: str) -> dict:
+    """{track_lower: {(race_no, tab_no), ...}} — same proven service the
+    curate path uses (pf-scratchings-conditions). Makes the 08:00 re-run
+    scratching-aware: the PF payloads are static after the 04:00 harvest,
+    so without this a late scratching would silently stay tipped
+    (the 2026-07-24 Neeson lesson). Fail-open with a loud log."""
+    out: dict = {}
+    try:
+        with urllib.request.urlopen(
+                f"{SCRATCHINGS_URL}/scratchings/flat?date={day}",
+                timeout=20) as r:
+            data = json.load(r)
+        for row in (data or {}).get("rows", []):
+            tr = (row.get("track") or "").lower().strip()
+            rn, tn = row.get("raceNo"), row.get("tabNo")
+            if tr and rn and tn:
+                out.setdefault(tr, set()).add((int(rn), int(tn)))
+    except Exception as e:
+        print(f"[8f-gen] SCRATCHINGS FETCH FAILED ({e}) — generating "
+              f"WITHOUT the scratchings sweep", flush=True)
+    return out
 
 
 def load_races(scur, day: str, live: bool):
@@ -144,11 +170,19 @@ def main() -> int:
         trs = psycopg2.connect(os.environ["TRS_DATABASE_URL"], connect_timeout=20)
         tcur = trs.cursor()
 
+    scr = fetch_scratchings(day)
+    if scr:
+        print(f"[8f-gen] scratchings loaded for {len(scr)} tracks "
+              f"({sum(len(v) for v in scr.values())} runners)")
+
     n_tips = 0
     for mid, rn, payload in races:
         p = json.loads(payload) if isinstance(payload, str) else payload
         pl = (p or {}).get("payLoad") or {}
-        scored = score_race(p)
+        track_l = (((pl.get("meeting") or {}).get("track") or {})
+                   .get("name") or "").lower().strip()
+        scr_tabs = {tab for (r_, tab) in scr.get(track_l, set()) if r_ == rn}
+        scored = score_race(p, scratched=scr_tabs)
         if len(scored) < 4:
             continue
         tips = select_tips(scored)
