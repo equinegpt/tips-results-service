@@ -31,6 +31,7 @@ import psycopg2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.analyst import score_race, select_tips  # noqa: E402
+from app.analyst.reasoning import _settle_avg  # noqa: E402
 
 TUNE_END = date(2026, 5, 31)          # <= this: TUNE; after: HOLDOUT
 
@@ -93,7 +94,8 @@ def main() -> int:
         fw = csv.writer(ffout)
         fw.writerow(["date", "pf_meeting_id", "race", "tab",
                      "z_sect", "z_speed", "z_map", "z_dist", "z_track",
-                     "z_cond", "z_trend", "z_conn", "raw_sect", "won", "sp"])
+                     "z_cond", "z_trend", "z_conn", "raw_sect", "won", "sp",
+                     "barrier", "settle", "field"])
 
     unmatched_tracks = defaultdict(int)
     day = start
@@ -135,12 +137,16 @@ def main() -> int:
                         res_ = ra[key].get((rn, e["tab_number"]))
                         if res_ is None or res_[2] or res_[0] is None or res_[1] <= 0:
                             continue
+                        _settle = _settle_avg(e["runner"])
                         fw.writerow([iso, mid, rn, e["tab_number"],
                                      *(e["z"][k] for k in
                                        ("sect", "speed", "map", "dist", "track",
                                         "cond", "trend", "conn")),
                                      e["raw"]["sect"] if e["raw"]["sect"] is not None else "",
-                                     1 if res_[0] == 1 else 0, res_[1]])
+                                     1 if res_[0] == 1 else 0, res_[1],
+                                     e.get("barrier") or "",
+                                     round(_settle, 2) if _settle is not None else "",
+                                     len(scored)])
                 tips = select_tips(scored)
                 n_races += 1
                 for tip_type, entry in (("AI_BEST", tips.get("ai_best")),
