@@ -1,18 +1,16 @@
 # app/clients.py
+"""Provider singletons.
+
+2026-08-04 STRIP: iReel (chat API) and Gemini (Stablfy platform →
+Google) are RETIRED — tips are generated in-house
+(scripts/generate_8f_tips.py, source='8F', served to legacy consumers
+via GEMINI_ALIAS_SOURCE). The objects below keep the old import
+surface alive: parse_tips_text still works (admin manual entry);
+every retired network method raises 410 Gone.
+"""
 from __future__ import annotations
 
-from .config import settings
-from .ireel_client import IreelClient
-from .gemini_client import GeminiClient
+from .tip_parser import RetiredProvider, TipTextParser
 
-ireel_client = IreelClient(
-    api_key=settings.ireel_api_key,
-    api_base_url=settings.ireel_api_base_url,
-    assistant_id=settings.ireel_assistant_id or "",
-)
-
-gemini_client = GeminiClient(
-    api_url=settings.stablfy_api_url,
-    username=settings.stablfy_username,
-    password=settings.stablfy_password,
-)
+ireel_client = TipTextParser()      # .parse_tips_text lives; the rest 410s
+gemini_client = RetiredProvider()   # everything 410s
