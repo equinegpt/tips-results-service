@@ -1,0 +1,46 @@
+[bt] ...2026-08-01: 4955 races so far
+[bt] generated tips for 5019 races across 100 days -> /Users/andrewholmes/tips-results-service/output/analyst_backtest_tips.csv
+[bt] UNMATCHED tracks (races skipped): 658 — top: [('Cambridge Synthetic', 25), ('Ruakaka', 24), ('Murwillumbah', 23), ('Otaki', 23), ('Casino', 22), ('Wellington', 22), ('Sha Tin', 22), ('Awapuni Synthetic', 19), ('Riccarton Park Synthetic', 18), ('Happy Valley', 18)]
+
+== 8F Analyst — ALL (2026-04-01 → 2026-08-03) ==
+  AI_BEST : n= 4979 strike= 19.8% ROI@SP= -18.9%  (void 40)
+  DANGER  : n= 4972 strike= 15.8% ROI@SP= -18.6%  (void 47)
+  VALUE   : n= 4974 strike= 11.8% ROI@SP= -27.1%  (void 45)
+
+== 8F Analyst — TUNE (≤ May 31) ==
+  AI_BEST : n= 1834 strike= 19.1% ROI@SP= -21.1%  (void 16)
+  DANGER  : n= 1828 strike= 15.8% ROI@SP= -17.4%  (void 22)
+  VALUE   : n= 1830 strike= 12.8% ROI@SP= -18.3%  (void 20)
+
+== 8F Analyst — HOLDOUT (Jun 1 →) ==
+  AI_BEST : n= 3145 strike= 20.2% ROI@SP= -17.7%  (void 24)
+  DANGER  : n= 3144 strike= 15.7% ROI@SP= -19.2%  (void 25)
+  VALUE   : n= 3144 strike= 11.2% ROI@SP= -32.3%  (void 25)
+
+== AI_BEST by month ==
+  2026-04: n= 276 strike= 21.0% ROI@SP= -15.8%
+  2026-05: n=1558 strike= 18.8% ROI@SP= -22.0%
+  2026-06: n=1429 strike= 20.4% ROI@SP= -16.2%
+  2026-07: n=1521 strike= 19.6% ROI@SP= -18.9%
+  2026-08: n= 195 strike= 22.6% ROI@SP= -19.1%
+
+== Recorded benchmark (same window) ==
+  Clone/AI_BEST   : n=    8 strike= 37.5% ROI@SP= +26.2%  (void 0)
+  Clone/DANGER    : n=    8 strike= 12.5% ROI@SP= -31.2%  (void 0)
+  Clone/VALUE     : n=    8 strike= 25.0% ROI@SP= +27.5%  (void 0)
+  Gemini/AI_BEST  : n= 3783 strike= 25.5% ROI@SP= -13.1%  (void 472)
+  Gemini/DANGER   : n= 3759 strike= 16.6% ROI@SP= -22.1%  (void 497)
+  Gemini/VALUE    : n= 3751 strike= 12.3% ROI@SP= -15.7%  (void 505)
+  iReel/AI_BEST   : n= 3700 strike= 23.7% ROI@SP= -15.2%  (void 1131)
+  iReel/DANGER    : n= 3708 strike= 17.1% ROI@SP= -10.0%  (void 1123)
+  iReel/VALUE     : n= 3703 strike= 12.1% ROI@SP= -20.3%  (void 1128)
+
+== Head-to-head vs Gemini (same 3536 races, AI_BEST) ==
+  agreement: 26.9%
+  8F:      strike= 20.1% ROI@SP= -17.2%
+  Gemini : strike= 25.6% ROI@SP= -13.0%
+
+== Head-to-head vs iReel (same 3459 races, AI_BEST) ==
+  agreement: 28.7%
+  8F:      strike= 20.0% ROI@SP= -18.2%
+  iReel  : strike= 23.6% ROI@SP= -16.2%
