@@ -38,7 +38,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.analyst import score_race, select_tips, reasoning_line  # noqa: E402
 
 SOURCE = "Jennifer"
-MODEL_VERSION = "jennifer-v1.0-fitted-20260804"
+MODEL_VERSION = "jennifer-v1.0-fitted-20260804"   # fallback when no weights row
+
+
+def load_approved_weights(tcur):
+    """Latest approved weights from the weekly refit (jennifer_weights).
+    Returns (weights dict | None, model_version str). Fail-open to the
+    code defaults — a missing/broken table must never stop the tips."""
+    try:
+        tcur.execute("""SELECT version, weights FROM jennifer_weights
+            WHERE approved ORDER BY version DESC LIMIT 1""")
+        row = tcur.fetchone()
+        if row:
+            w = row[1] if isinstance(row[1], dict) else json.loads(row[1])
+            return w, f"jennifer-v{row[0]}"
+    except Exception as e:
+        print(f"[8f-gen] weights table unavailable ({str(e)[:60]}) — code defaults")
+    return None, MODEL_VERSION
 SCRATCHINGS_URL = os.environ.get(
     "SCRATCHINGS_URL", "https://pf-scratchings-conditions.onrender.com")
 
@@ -118,7 +134,7 @@ def upsert_race(tcur, meeting_uuid, rn, pl):
     return tcur.fetchone()[0]
 
 
-def get_or_create_run(tcur, meeting_uuid, pf_meeting_id):
+def get_or_create_run(tcur, meeting_uuid, pf_meeting_id, model_version=MODEL_VERSION):
     tcur.execute("""SELECT id FROM tip_runs
         WHERE source = %s AND meeting_id = %s""", (SOURCE, meeting_uuid))
     row = tcur.fetchone()
@@ -128,7 +144,7 @@ def get_or_create_run(tcur, meeting_uuid, pf_meeting_id):
         INSERT INTO tip_runs (id, source, model_version, meeting_id, meta,
                               created_at)
         VALUES (%s, %s, %s, %s, %s, now()) RETURNING id""",
-        (str(uuid.uuid4()), SOURCE, MODEL_VERSION, meeting_uuid,
+        (str(uuid.uuid4()), SOURCE, model_version, meeting_uuid,
          json.dumps({"generator": "deterministic-cascade",
                      "pf_meeting_id": pf_meeting_id})))
     return tcur.fetchone()[0]
@@ -166,11 +182,16 @@ def main() -> int:
 
     trs = None
     tcur = None
+    weights, model_version = None, MODEL_VERSION
     if args.commit:
         trs = psycopg2.connect(
             os.environ.get("TRS_DATABASE_URL") or os.environ["DATABASE_URL"],
             connect_timeout=20)  # on the TRS box, DATABASE_URL IS the TRS DB
         tcur = trs.cursor()
+        trs.rollback()  # clean slate before the weights probe
+        weights, model_version = load_approved_weights(tcur)
+        trs.rollback()  # weights probe must not poison the write txn
+        print(f"[8f-gen] weights: {model_version}")
 
     scr = fetch_scratchings(day)
     if scr:
@@ -184,7 +205,7 @@ def main() -> int:
         track_l = (((pl.get("meeting") or {}).get("track") or {})
                    .get("name") or "").lower().strip()
         scr_tabs = {tab for (r_, tab) in scr.get(track_l, set()) if r_ == rn}
-        scored = score_race(p, scratched=scr_tabs)
+        scored = score_race(p, scratched=scr_tabs, weights=weights)
         if len(scored) < 4:
             continue
         tips = select_tips(scored)
@@ -206,7 +227,7 @@ def main() -> int:
         else:
             m_uuid, _ = upsert_meeting(tcur, day, pl, pf_meeting_id=mid)
             r_uuid = upsert_race(tcur, m_uuid, rn, pl)
-            run_id = get_or_create_run(tcur, m_uuid, mid)
+            run_id = get_or_create_run(tcur, m_uuid, mid, model_version)
             for tt, (e, reason) in lines.items():
                 upsert_tip(tcur, run_id, r_uuid, tt, e, reason)
                 n_tips += 1

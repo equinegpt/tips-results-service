@@ -234,7 +234,8 @@ def _znorm(values: Dict[int, Optional[float]]) -> Dict[int, float]:
 
 def score_race(race_payload: dict,
                speedmap_by_tab: Optional[Dict[int, dict]] = None,
-               scratched: Optional[set] = None) -> List[dict]:
+               scratched: Optional[set] = None,
+               weights: Optional[Dict[str, float]] = None) -> List[dict]:
     """Score every non-scratched runner. Returns runners sorted best-first,
     each with total, per-component z + raw values (for reasoning lines)."""
     pl = race_payload.get("payLoad") or race_payload
@@ -261,10 +262,14 @@ def score_race(race_payload: dict,
         raw["conn"][tab] = _conn_component(r)
 
     z = {k: _znorm(v) for k, v in raw.items()}
+    # weights override (2026-08-06): the weekly refit ships new weights
+    # via the jennifer_weights table — no deploy needed. Code W = the
+    # fallback when no approved row exists.
+    Wx = weights or W
     out = []
     for r in runners:
         tab = r.get("tabNumber")
-        total = sum(W[k] * z[k][tab] for k in W)
+        total = sum(Wx.get(k, 0.0) * z[k][tab] for k in W)
         out.append({
             "tab_number": tab,
             "horse_name": (r.get("horseName") or "").strip(),
