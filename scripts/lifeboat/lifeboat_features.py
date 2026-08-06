@@ -160,6 +160,43 @@ class LifeboatLoader:
             ORDER BY as_of DESC LIMIT 1""", (entity_type, canon(name), as_of))
         return self.cur.fetchone()
 
+    def _sectionals(self, horse_id, before: date) -> list:
+        """sectionalData[] for the last 3 runs (shared by the backtest
+        payload and the live-card payload)."""
+        sect = []
+        for run in self.recent_runs(horse_id, before):
+            cg = COND_GROUP(run["track_condition"])
+            kg = class_group(run["race_class"])
+            par6, par2 = self.par_for(run["track_id"], run["distance"], cg, kg)
+            l6c = (round((float(run["last_600m"]) - par6) / LEN_SECONDS, 2)
+                   if run["last_600m"] and par6 else None)
+            l2c = (round((float(run["last_200m"]) - par2) / LEN_SECONDS, 2)
+                   if run["last_200m"] and par2 else None)
+            inrun = f"finish,{run['position']};" if run["position"] else ""
+            if run["position_800m"]:
+                inrun += (f"settling_down,{run['position_800m']};"
+                          f"m800,{run['position_800m']};")
+            if run["position_400m"]:
+                inrun += f"m400,{run['position_400m']};"
+            flucs = ""
+            if run["odds_opening"] and run["odds_closing"]:
+                flucs = (f"opening,{float(run['odds_opening']):.2f};"
+                         f"starting,{float(run['odds_closing']):.2f};")
+            sect.append({
+                "meetingDate": str(run["race_date"]),
+                "track": {"name": run["track_name"],
+                          "distance": run["distance"],
+                          "raceClass": run["race_class"],
+                          "trackCondition": run["track_condition"]},
+                "last600Class": l6c, "last200Class": l2c,
+                "finishClass": None, "to600Class": None,
+                "last600Time": float(run["last_600m"]) if run["last_600m"] else None,
+                "last200Time": float(run["last_200m"]) if run["last_200m"] else None,
+                "margFin": float(run["margin"]) if run["margin"] is not None else None,
+                "jockey": {"inRun": inrun, "flucs": flucs},
+            })
+        return sect
+
     # -------------------------------------------------------- payload
     def build_payload(self, race_id) -> dict:
         self.cur.execute("""
@@ -179,37 +216,7 @@ class LifeboatLoader:
         rd = race["race_date"]
         runners = []
         for i, e in enumerate(sorted(entries, key=lambda x: x["barrier"] or 99)):
-            sect = []
-            for run in self.recent_runs(e["horse_id"], rd):
-                cg = COND_GROUP(run["track_condition"])
-                kg = class_group(run["race_class"])
-                par6, par2 = self.par_for(run["track_id"], run["distance"], cg, kg)
-                l6c = (round((float(run["last_600m"]) - par6) / LEN_SECONDS, 2)
-                       if run["last_600m"] and par6 else None)
-                l2c = (round((float(run["last_200m"]) - par2) / LEN_SECONDS, 2)
-                       if run["last_200m"] and par2 else None)
-                inrun = f"finish,{run['position']};" if run["position"] else ""
-                if run["position_800m"]:
-                    inrun += f"settling_down,{run['position_800m']};m800,{run['position_800m']};"
-                if run["position_400m"]:
-                    inrun += f"m400,{run['position_400m']};"
-                flucs = ""
-                if run["odds_opening"] and run["odds_closing"]:
-                    flucs = (f"opening,{float(run['odds_opening']):.2f};"
-                             f"starting,{float(run['odds_closing']):.2f};")
-                sect.append({
-                    "meetingDate": str(run["race_date"]),
-                    "track": {"name": run["track_name"],
-                              "distance": run["distance"],
-                              "raceClass": run["race_class"],
-                              "trackCondition": run["track_condition"]},
-                    "last600Class": l6c, "last200Class": l2c,
-                    "finishClass": None, "to600Class": None,
-                    "last600Time": float(run["last_600m"]) if run["last_600m"] else None,
-                    "last200Time": float(run["last_200m"]) if run["last_200m"] else None,
-                    "margFin": float(run["margin"]) if run["margin"] is not None else None,
-                    "jockey": {"inRun": inrun, "flucs": flucs},
-                })
+            sect = self._sectionals(e["horse_id"], rd)
             ja = self.a2e("jockey", e["jockey_name"] or "", rd) or {}
             ta = self.a2e("trainer", e["trainer_name"] or "", rd) or {}
             runners.append({
@@ -246,6 +253,65 @@ class LifeboatLoader:
             "distance": race["distance"], "raceClass": race["race_class"],
             "trackCondition": race["track_condition"],
             "meeting": {"track": {"name": race["track_name"]}},
+            "runners": runners,
+        }}
+
+    def build_payload_from_card(self, card_date, track, race_no) -> dict:
+        """Live-world payload: TODAY's card from lifeboat_cards (the
+        Racenet adapter), history/pars/A2E from racing-db. Scratched
+        runners are excluded here — no separate scratchings feed exists
+        in the lifeboat world. Unmatched horse_id (first starter or
+        name gap) = empty form, which the scorer z-defaults to 0."""
+        self.cur.execute("""
+            SELECT * FROM lifeboat_cards
+            WHERE card_date = %s AND track = %s AND race_no = %s
+            ORDER BY tab_no""", (card_date, track, race_no))
+        card = self.cur.fetchall()
+        if not card:
+            raise LookupError(f"no card rows for {card_date} {track} R{race_no}")
+        self.cur.execute("SELECT track_id FROM tracks WHERE name ILIKE %s",
+                         (card[0]["track"],))
+        trow = self.cur.fetchone()
+        track_id = trow["track_id"] if trow else None
+        rd = card[0]["card_date"]
+        runners = []
+        for e in card:
+            if e["scratched"]:
+                continue
+            hid = e["horse_id"]
+            ja = self.a2e("jockey", e["jockey"] or "", rd) or {}
+            ta = self.a2e("trainer", e["trainer"] or "", rd) or {}
+            runners.append({
+                "tabNumber": e["tab_no"],
+                "horseName": e["horse"],
+                "barrier": e["barrier"],
+                "weight": e["weight"],
+                "sex": None,
+                "_horse_id": hid,
+                "sectionalData": self._sectionals(hid, rd) if hid else [],
+                "historicPerformanceData": self.perf_data(
+                    hid if hid else -1, rd, track_id, e["distance"]),
+                "jockeyData": {
+                    "fullName": e["jockey"] or "",
+                    "jockeyFormLast100Races": {
+                        "strikeRatePct": ja.get("sr_100"),
+                        "overUnderPerformancePct": ja.get("a2e_100"),
+                    }},
+                "trainerData": {
+                    "trainerFormLast100Races": {
+                        "name": e["trainer"] or "",
+                        "strikeRatePct": ta.get("sr_100"),
+                        "overUnderPerformancePct": ta.get("a2e_100"),
+                    }},
+            })
+        meta = card[0]
+        return {"payLoad": {
+            "_race_date": str(rd),
+            "_start_time": meta["start_time"],
+            "name": None, "number": race_no,
+            "distance": meta["distance"], "raceClass": meta["race_class"],
+            "trackCondition": meta["track_condition"],
+            "meeting": {"track": {"name": meta["track"]}},
             "runners": runners,
         }}
 

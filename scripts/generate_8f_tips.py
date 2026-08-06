@@ -82,6 +82,31 @@ def fetch_scratchings(day: str) -> dict:
     return out
 
 
+def load_races_lifeboat(day: str):
+    """BREAK-GLASS ONLY (LIFEBOAT=1, set by a human — never automate):
+    payloads synthesized 100% from racing-db + the Racenet card sweep
+    (lifeboat_cards), zero Punting Form. Graded 2026-08-06: holdout
+    19.1%/-6.0% vs live Jennifer 22.3%/-11.0. Prereq: the card adapter
+    ran for `day` (scripts/lifeboat/lifeboat_card_adapter.py).
+    Scratchings are card-level (selection-scratched) — the PF
+    scratchings service is assumed dead in this world."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "lifeboat"))
+    from lifeboat_features import LifeboatLoader
+    conn = psycopg2.connect(os.environ["RACING_DB_URL"], connect_timeout=30)
+    loader = LifeboatLoader(conn)
+    cur = conn.cursor()
+    cur.execute("""SELECT DISTINCT track, race_no FROM lifeboat_cards
+                   WHERE card_date = %s ORDER BY track, race_no""", (day,))
+    out = []
+    for track, rno in cur.fetchall():
+        try:
+            out.append((None, rno, loader.build_payload_from_card(day, track, rno)))
+        except Exception as exc:
+            print(f"[8f-gen] LIFEBOAT payload failed {track} R{rno}: {exc}",
+                  flush=True)
+    return out
+
+
 def load_races(scur, day: str, live: bool):
     """Latest snapshot per race — pre-race-morning cutoff for retro days,
     plain latest for live (it IS the morning)."""
@@ -172,8 +197,16 @@ def main() -> int:
     day = args.date or mel_today
     live = day >= mel_today
 
-    shared = psycopg2.connect(os.environ["SHARED_DATABASE_URL"], connect_timeout=20)
-    races = load_races(shared.cursor(), day, live)
+    lifeboat = os.environ.get("LIFEBOAT") == "1"
+    shared = None
+    if lifeboat:
+        print("[8f-gen] *** LIFEBOAT MODE — payloads from racing-db + "
+              "Racenet cards, ZERO Punting Form ***", flush=True)
+        races = load_races_lifeboat(day)
+    else:
+        shared = psycopg2.connect(os.environ["SHARED_DATABASE_URL"],
+                                  connect_timeout=20)
+        races = load_races(shared.cursor(), day, live)
     print(f"[8f-gen] {day} ({'live' if live else 'retro'}): "
           f"{len(races)} race payloads")
     if not races:
@@ -192,8 +225,16 @@ def main() -> int:
         weights, model_version = load_approved_weights(tcur)
         trs.rollback()  # weights probe must not poison the write txn
         print(f"[8f-gen] weights: {model_version}")
+    if lifeboat:
+        # Phase C verdict: refit weights fail the ROI guard on lifeboat
+        # features — code weights ARE the lifeboat config. Stamp the
+        # provenance so cohorts stay separable.
+        weights = None
+        model_version = "jennifer-lifeboat-v1"
 
-    scr = fetch_scratchings(day)
+    # lifeboat cards carry their own scratchings; the PF service is
+    # assumed dead in that world
+    scr = {} if lifeboat else fetch_scratchings(day)
     if scr:
         print(f"[8f-gen] scratchings loaded for {len(scr)} tracks "
               f"({sum(len(v) for v in scr.values())} runners)")
@@ -235,8 +276,9 @@ def main() -> int:
         trs.commit()
         trs.close()
         print(f"[8f-gen] committed {n_tips} tips as source='{SOURCE}' "
-              f"({MODEL_VERSION})")
-    shared.close()
+              f"({model_version})")
+    if shared is not None:
+        shared.close()
     return 0
 
 
