@@ -173,6 +173,11 @@ def main() -> int:
     cur.execute("DROP TABLE IF EXISTS lifeboat_connection_a2e")
     cur.execute("ALTER TABLE lifeboat_connection_a2e_new "
                 "RENAME TO lifeboat_connection_a2e")
+    # PK index name is schema-global and carries the _new suffix through
+    # the rename — rename it too or the NEXT monthly rebuild's CREATE
+    # TABLE collides on the auto-named pkey
+    cur.execute("ALTER INDEX lifeboat_connection_a2e_new_pkey "
+                "RENAME TO lifeboat_connection_a2e_pkey")
     conn.commit()
     cur.execute("SELECT entity_type, count(DISTINCT entity_key), count(*) FROM lifeboat_connection_a2e GROUP BY 1")
     for r in cur.fetchall():
