@@ -61,8 +61,11 @@ def main() -> int:
     url = os.environ.get("RACING_DB_URL") or os.environ["DATABASE_URL"]
     conn = psycopg2.connect(url, connect_timeout=30)
     cur = conn.cursor()
+    # build into a staging table, swap atomically at the end — a parked
+    # fallback must never be left tableless by a mid-run failure
+    cur.execute("DROP TABLE IF EXISTS lifeboat_sectional_pars_new")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS lifeboat_sectional_pars (
+        CREATE TABLE lifeboat_sectional_pars_new (
             level TEXT NOT NULL,
             track_id INT,
             dist_bucket INT,
@@ -72,7 +75,6 @@ def main() -> int:
             par_600 REAL,
             par_200 REAL,
             built_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
-    cur.execute("TRUNCATE lifeboat_sectional_pars")
     conn.commit()
 
     base = f"""
@@ -98,7 +100,7 @@ def main() -> int:
                  "cond_group": "text", "class_group": "text"}
         select_nulls = "".join(f", NULL::{types[c]} AS {c}" for c in null_cols)
         cur.execute(base + f"""
-            INSERT INTO lifeboat_sectional_pars
+            INSERT INTO lifeboat_sectional_pars_new
                 (level, track_id, dist_bucket, cond_group, class_group, n, par_600, par_200)
             SELECT '{level}', track_id, dist_bucket, cond_group, class_group,
                    count(*),
@@ -108,10 +110,14 @@ def main() -> int:
             GROUP BY track_id, dist_bucket, cond_group, class_group
             HAVING count(*) >= 20""")
         conn.commit()
-        cur.execute("SELECT count(*) FROM lifeboat_sectional_pars WHERE level = %s", (level,))
+        cur.execute("SELECT count(*) FROM lifeboat_sectional_pars_new WHERE level = %s", (level,))
         n = cur.fetchone()[0]
         total += n
         print(f"[pars] {level}: {n} cells")
+    # atomic swap: readers see the old table until the instant the new
+    # one is complete
+    cur.execute("DROP TABLE IF EXISTS lifeboat_sectional_pars")
+    cur.execute("ALTER TABLE lifeboat_sectional_pars_new RENAME TO lifeboat_sectional_pars")
     cur.execute("""CREATE INDEX IF NOT EXISTS ix_lifeboat_pars
         ON lifeboat_sectional_pars (level, track_id, dist_bucket, cond_group, class_group)""")
     conn.commit()

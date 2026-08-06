@@ -77,15 +77,23 @@ frozen-Clone ablation test first (null PF features, measure decay).
 Unset `LIFEBOAT=1` (and redeploy). The default PF path is untouched by
 lifeboat code — the switch is a payload-source swap only.
 
-## Standing maintenance
+## Standing maintenance — the backup TRAINS while parked
 
-- **Quarterly drill** — Render cron `lifeboat-quarterly-drill`
-  (crn-d9q54rflk1mc73ejqf50, 1 Jan/Apr/Jul/Oct 22:00Z): freshness
-  checks → live card fetch → LIFEBOAT dry-run → 8F-Ops PASS/FAIL.
-  A failed drill is a real incident: the fallback has rotted.
-- **Engine refresh** — quarterly with the drill, or ad-hoc before any
-  real activation (step 2). Not yet cron'd: build_a2e RAM footprint
-  needs a bigger box than the cron plan.
+- **Monthly engine retrain** — Render cron `lifeboat-monthly-refresh`
+  (crn-d9q5lg67bikc738hemeg, 1st 12:00Z = 22:00 AEST, pro plan for
+  build_a2e's RAM): rebuilds pars + PIT A2E from racing-db via staging
+  tables with an ATOMIC swap (a mid-run failure leaves the old tables
+  intact — the parked fallback is never tableless). Sanity-gates on
+  racing-db still filling (≥100 races in last 14d) so a stalled crawl
+  can't bake decay into the engines. ntfy 8F-Ops PASS/FAIL.
+- **Quarterly drill + re-grade** — Render cron
+  `lifeboat-quarterly-drill` (crn-d9q54rflk1mc73ejqf50, 1 Jan/Apr/Jul/
+  Oct 22:00Z, i.e. 10h after that day's refresh): freshness checks →
+  live card fetch → LIFEBOAT dry-run → **28-day backtest re-grade**
+  (top-pick strike must hold ≥16%, ~2σ under the Phase C 19.1%).
+  8F-Ops PASS/FAIL. A failed drill is a real incident: the fallback
+  has rotted — and the re-grade line says whether it's the plumbing
+  or the picking that broke.
 - After any Racenet page redesign, re-run
   `lifeboat_card_adapter.py --max-races 3` and eyeball the parse.
 

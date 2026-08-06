@@ -13,12 +13,19 @@ reports to 8F-Ops:
      upsert lifeboat_cards (the canary is the match rate).
   3. Generator: LIFEBOAT=1 DRY RUN (no --commit — the drill NEVER
      writes tips), count races tipped.
+  4. Optional RE-GRADE (--regrade-days N): replay the trailing N days
+     of settleable races through the lifeboat backtest and check the
+     top-pick strike is still in the graded band (Phase C holdout =
+     19.1%; alarm below 16%, ~2σ under it on a monthly-sized sample).
+     This is the "is the backup still GOOD" check, not just "does it
+     still run".
 
 Exit 0 + green ntfy on pass; exit 1 + red ntfy on any failure.
 
 Usage:
   RACING_DB_URL=... SCRAPER_API_KEY=... \
-      python scripts/lifeboat/lifeboat_drill.py [--max-races N] [--no-ntfy]
+      python scripts/lifeboat/lifeboat_drill.py [--max-races N] \
+      [--regrade-days 28] [--no-ntfy]
 """
 from __future__ import annotations
 
@@ -35,6 +42,42 @@ import psycopg2
 ROOT = Path(__file__).resolve().parent.parent.parent
 NTFY_TOPIC = "8F-Ops"
 A2E_STALE_DAYS = 120   # PIT snapshots are monthly; >4 months = decayed
+REGRADE_STRIKE_FLOOR = 16.0   # Phase C graded 19.1%; ~2σ below on ~900 races
+REGRADE_SHARDS = 4
+
+
+def regrade(day, days: int, tmpdir: Path) -> tuple[bool, str]:
+    """Replay the trailing `days` of races through the lifeboat
+    backtest (sharded subprocesses — DB-bound, parallelism is free)."""
+    from datetime import timedelta
+    start = (day - timedelta(days=days)).isoformat()
+    end = (day - timedelta(days=1)).isoformat()
+    procs = []
+    for i in range(REGRADE_SHARDS):
+        procs.append(subprocess.Popen(
+            [sys.executable,
+             str(ROOT / "scripts/lifeboat/lifeboat_backtest.py"),
+             start, end, str(tmpdir / f"regrade_{i}.csv"),
+             "--shard", f"{i}/{REGRADE_SHARDS}"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
+    wins = picks = 0
+    roi_w = 0.0
+    for p in procs:
+        out, _ = p.communicate(timeout=7200)
+        m = re.search(r"DONE code-weights baseline: (\d+)/(\d+) "
+                      r"\([\d.]+%\), roi ([+-][\d.]+)%", out)
+        if p.returncode != 0 or not m:
+            return False, f"regrade shard failed: {out[-200:]}"
+        wins += int(m.group(1))
+        picks += int(m.group(2))
+        roi_w += float(m.group(3)) * int(m.group(2))
+    if picks < 100:
+        return False, f"regrade: only {picks} settleable races in {days}d"
+    strike = 100.0 * wins / picks
+    roi = roi_w / picks
+    ok = strike >= REGRADE_STRIKE_FLOOR
+    return ok, (f"regrade {start}..{end}: {wins}/{picks} = {strike:.1f}% "
+                f"(floor {REGRADE_STRIKE_FLOOR}%), SP roi {roi:+.1f}%")
 
 
 def ntfy(title: str, msg: str, tags: str):
@@ -102,6 +145,14 @@ def main() -> int:
             failures.append(f"generator exit {g.returncode}, "
                             f"{tipped}/{races_fetched} tipped: "
                             f"{(g.stdout + g.stderr)[-300:]}")
+
+    # 4 — quarterly re-grade: is the backup still GOOD, not just alive
+    if "--regrade-days" in sys.argv:
+        days = int(sys.argv[sys.argv.index("--regrade-days") + 1])
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            g_ok, g_msg = regrade(day, days, Path(td))
+        (checks if g_ok else failures).append(g_msg)
 
     ok = not failures
     body = "\n".join([f"OK  {c}" for c in checks]

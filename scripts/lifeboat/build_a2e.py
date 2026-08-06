@@ -117,10 +117,11 @@ def main() -> int:
     url = os.environ.get("RACING_DB_URL") or os.environ["DATABASE_URL"]
     conn = psycopg2.connect(url, connect_timeout=30)
     cur = conn.cursor()
-    cur.execute("DROP TABLE IF EXISTS lifeboat_connection_a2e")
+    # staging + atomic swap — never leave the parked fallback tableless
+    cur.execute("DROP TABLE IF EXISTS lifeboat_connection_a2e_new")
     conn.commit()
     cur.execute("""
-        CREATE TABLE lifeboat_connection_a2e (
+        CREATE TABLE lifeboat_connection_a2e_new (
             entity_type TEXT NOT NULL,
             entity_key TEXT NOT NULL,
             as_of DATE NOT NULL,
@@ -164,11 +165,14 @@ def main() -> int:
     rows = jock + trn
     print(f"[a2e] inserting {len(rows)} snapshot rows…")
     psycopg2.extras.execute_values(cur, """
-        INSERT INTO lifeboat_connection_a2e
+        INSERT INTO lifeboat_connection_a2e_new
             (entity_type, entity_key, as_of, career_runs, career_wins,
              career_exp, career_a2e, runs_365, wins_365, exp_365, a2e_365, sr_365,
              runs_100, wins_100, a2e_100, sr_100)
         VALUES %s""", rows, page_size=2000)
+    cur.execute("DROP TABLE IF EXISTS lifeboat_connection_a2e")
+    cur.execute("ALTER TABLE lifeboat_connection_a2e_new "
+                "RENAME TO lifeboat_connection_a2e")
     conn.commit()
     cur.execute("SELECT entity_type, count(DISTINCT entity_key), count(*) FROM lifeboat_connection_a2e GROUP BY 1")
     for r in cur.fetchall():
