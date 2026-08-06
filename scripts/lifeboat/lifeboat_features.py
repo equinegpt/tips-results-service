@@ -241,6 +241,7 @@ class LifeboatLoader:
                     }},
             })
         return {"payLoad": {
+            "_race_date": str(rd),
             "name": race["race_name"], "number": race["race_number"],
             "distance": race["distance"], "raceClass": race["race_class"],
             "trackCondition": race["track_condition"],
