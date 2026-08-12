@@ -41,9 +41,15 @@ import requests
 BASE = "https://www.racenet.com.au"
 INDEX = f"{BASE}/form-guide"
 # same foreign-track filter family as the odds sweep
+# NZ deliberately KEPT (2026-08-12, Clone/NM drill finding): the engine
+# cards NZ meetings and the odds sweep keeps them — the adapter was the
+# only lifeboat component dropping them (Arawa Park missing = 13 races
+# of drill coverage). Suffix list matches the sweep's family; some
+# no-suffix internationals still leak through and are dropped
+# downstream by the engine's TAB-meeting filter.
 _FOREIGN = re.compile(
-    r"(-nz|-uk|-gb|-fr|-jpn|-jp|-hk|-sgp|-sg|-usa|-us|-ca|-ire|-saf|-za|"
-    r"-tr|-kor|-mac|-uae|-in|-de|-ita|-swe|-chi|-arg|-bra)$")
+    r"(-uk|-gb|-fr|-jpn|-jp|-hk|-sgp|-sg|-usa|-us|-ca|-ire|-saf|-za|"
+    r"-tr|-kor|-mac|-uae|-in|-de|-ita|-swe|-chi|-arg|-bra|-esp|-mx)$")
 
 
 # --------------------------------------------------------------- fetch
