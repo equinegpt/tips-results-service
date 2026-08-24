@@ -193,8 +193,20 @@ def main() -> int:
     ap.add_argument("--date")
     ap.add_argument("--commit", action="store_true")
     args = ap.parse_args()
-    mel_today = datetime.now(ZoneInfo("Australia/Melbourne")).date().isoformat()
-    day = args.date or mel_today
+    mel_now = datetime.now(ZoneInfo("Australia/Melbourne"))
+    mel_today = mel_now.date().isoformat()
+    # Evening runs target TOMORROW (2026-08-24, evening-confluence lane):
+    # a pass after 5pm Melbourne generates the next day's tips so the
+    # 8pm confluence step has Jennifer for tomorrow. Morning passes
+    # (5am/8am) still (re)generate today in place — the board keeps
+    # using the freshest same-day tips as before.
+    if args.date:
+        day = args.date
+    elif mel_now.hour >= 17:
+        from datetime import timedelta
+        day = (mel_now.date() + timedelta(days=1)).isoformat()
+    else:
+        day = mel_today
     live = day >= mel_today
 
     lifeboat = os.environ.get("LIFEBOAT") == "1"
