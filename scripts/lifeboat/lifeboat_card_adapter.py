@@ -66,9 +66,23 @@ def scraper_get(url: str, timeout: int = 90, super_: bool = True):
 
 
 def discover_race_paths(day: date) -> list[str]:
-    resp = scraper_get(INDEX, timeout=120)
-    if resp.status_code != 200:
-        raise RuntimeError(f"form-guide index -> HTTP {resp.status_code}")
+    # The form-guide index can return a transient 202 — Racenet's front-door
+    # (Kasada) challenge, which lifts within a few minutes (same signature as
+    # the 2026-10-02 drill failure and the 6am pricing incident). Retry rather
+    # than hard-failing the whole drill on the first challenged response.
+    import time
+    last = None
+    for attempt in range(6):
+        resp = scraper_get(INDEX, timeout=120)
+        if resp.status_code == 200:
+            break
+        last = resp.status_code
+        print(f"[cards] form-guide index HTTP {last} "
+              f"(attempt {attempt + 1}/6) — front-door challenge, retrying",
+              flush=True)
+        time.sleep(45)
+    else:
+        raise RuntimeError(f"form-guide index -> HTTP {last} after 6 attempts")
     ymd = day.strftime("%Y%m%d")
     paths = sorted({m.group(0) for m in re.finditer(
         r"/form-guide/horse-racing/[a-z0-9\-]+-" + ymd +

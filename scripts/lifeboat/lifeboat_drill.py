@@ -83,8 +83,12 @@ def regrade(day, days: int, tmpdir: Path) -> tuple[bool, str]:
 def ntfy(title: str, msg: str, tags: str):
     try:
         import requests
-        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode(),
-                      headers={"Title": title, "Tags": tags}, timeout=15)
+        # Use the JSON body (UTF-8), NOT the Title HTTP header: headers are
+        # latin-1, so the em-dash in the title crashed the alert (2026-10-02).
+        requests.post("https://ntfy.sh", json={
+            "topic": NTFY_TOPIC, "title": title, "message": msg,
+            "tags": [t.strip() for t in tags.split(",") if t.strip()]},
+            timeout=15)
     except Exception as exc:
         print(f"[drill] ntfy failed: {exc}", flush=True)
 
